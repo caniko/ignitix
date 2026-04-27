@@ -576,7 +576,7 @@
             --extra-experimental-features 'nix-command flakes' \
             --no-link \
             --print-out-paths \
-            "$eval_flake_root#$eval_flake_attr.system.build.mount"
+            "$eval_flake_root#$eval_flake_attr.system.build.mountNoDeps"
         ) || {
           echo "Failed to build disko mount script for '$rescue_flake'." >&2
           exit 1
@@ -595,22 +595,44 @@
 
         echo "  Mount script: $mount_script"
         echo "  System: $system_path"
-        echo "Copying rescue closure to $target_host"
-        NIX_SSHOPTS="$nix_ssh_opts" nix-copy-closure --to "$target_host" "$mount_script" "$system_path"
+        echo "Copying disko mount script to $target_host"
+        NIX_SSHOPTS="$nix_ssh_opts" nix-copy-closure --to "$target_host" "$mount_script"
 
         printf -v remote_mount_script '%q' "$mount_script"
         printf -v remote_system_path '%q' "$system_path"
-        remote_script=$(cat <<EOF
+        remote_mount=$(cat <<EOF
         set -euo pipefail
         mkdir -p /mnt
         $remote_mount_script
+        test -d /mnt/nix/store
+EOF
+        )
+
+        echo "Mounting existing disko layout on $target_host"
+        # shellcheck disable=SC2029
+        ssh "''${ssh_args[@]}" "$target_host" "$remote_mount"
+
+        remote_store_host=$target_host
+        if [[ "$target_port" != "22" ]]; then
+          remote_store_host="$target_host:$target_port"
+        fi
+        remote_store="ssh://$remote_store_host?remote-store=local%3Froot%3D%2Fmnt"
+        echo "Copying system closure to mounted target store on $target_host"
+        NIX_SSHOPTS="$nix_ssh_opts" nix copy \
+          --extra-experimental-features nix-command \
+          --no-check-sigs \
+          --to "$remote_store" \
+          "$system_path"
+
+        remote_install=$(cat <<EOF
+        set -euo pipefail
         nixos-install --root /mnt --system $remote_system_path --no-channel-copy --no-root-password
 EOF
         )
 
-        echo "Mounting existing disko layout and installing system on $target_host"
+        echo "Installing system into mounted root on $target_host"
         # shellcheck disable=SC2029
-        ssh "''${ssh_args[@]}" "$target_host" "$remote_script"
+        ssh "''${ssh_args[@]}" "$target_host" "$remote_install"
 
         printf '%s\n' \
           "" \
