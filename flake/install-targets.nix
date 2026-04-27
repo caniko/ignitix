@@ -298,21 +298,6 @@
           fi
         }
 
-        ensure_remote_nixos_facter() {
-          local ssh_args=(-T -p "$target_port")
-          while IFS= read -r option; do
-            ssh_args+=(-o "$option")
-          done < <(jq -r '.sshOptions[]?' <<<"$target_json")
-
-          if ! ssh "''${ssh_args[@]}" "$target_host" 'command -v nixos-facter >/dev/null'; then
-            printf '%s\n' \
-              "Target '$target_host' does not expose a remote 'nixos-facter' binary." \
-              "The selected media '$media' is expected to bundle nixos-facter for offline probe/install flows." \
-              'Rebuild or reflash that installer media and retry.' >&2
-            exit 1
-          fi
-        }
-
         final_args=()
         if [[ "$store_paths_mode" != true && "$explicit_flake" != true ]]; then
           final_args+=(--flake "''${flake_override:-$default_flake}")
@@ -359,9 +344,6 @@
         fi
         if [[ "$check_declared_disko_disks" != true && "$passthrough_help" != true ]]; then
           echo "  Disk preflight: skipped while hardware config generation is active"
-        fi
-        if [[ "$hardware_check_backend" == "nixos-facter" && "$passthrough_help" != true ]]; then
-          ensure_remote_nixos_facter
         fi
         if [[ "$store_paths_mode" != true && "$passthrough_help" != true && "$check_declared_disko_disks" == true ]]; then
           if [[ "$explicit_flake" == true ]]; then
@@ -490,7 +472,7 @@
           exit 1
         fi
 
-        remote_cmd=(nixos-facter --ephemeral)
+        remote_cmd=(nixos-facter)
         remote_cmd+=("''${facter_args[@]}")
 
         printf -v remote_shell '%q ' "''${remote_cmd[@]}"
