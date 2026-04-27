@@ -66,6 +66,7 @@ installMediaLib.mkInstallerMedia {
             system.installer.channel.enable = false;
             programs.fuse.enable = lib.mkForce false;
             hardware.bluetooth.enable = lib.mkForce false;
+            hardware.fancontrol.enable = lib.mkForce false;
 
             boot.blacklistedKernelModules = [
               "bluetooth"
