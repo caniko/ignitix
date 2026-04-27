@@ -70,6 +70,7 @@
     }) target.routes;
   in {
     app = "install";
+    rescueApp = "rescue";
     probeApp = "probe-hardware";
     flakeUri = ".#${target.flakeAttr}";
     media = target.media;
@@ -90,12 +91,12 @@
 
   installTargetsJson = toJSON resolvedTargets;
 
-  installWrapperPackages = genAttrs installMediaLib.supportedBuildSystems (buildSystem: let
+  targetWrapperPackages = genAttrs installMediaLib.supportedBuildSystems (buildSystem: let
     pkgs = inputs.nixpkgs.legacyPackages.${buildSystem};
     availableTargets = renderAvailableTargets cfg;
-  in {
-    install = pkgs.writeShellApplication {
-      name = "install";
+    mkTargetWrapper = wrapperName: rescueMode:
+      pkgs.writeShellApplication {
+        name = wrapperName;
       runtimeInputs = [
         pkgs.coreutils
         pkgs.jq
@@ -106,10 +107,12 @@
         set -euo pipefail
 
         resolved_targets_json=${escapeShellArg installTargetsJson}
+        wrapper_name=${escapeShellArg wrapperName}
+        rescue_mode=${if rescueMode then "true" else "false"}
 
         usage() {
           printf '%s\n' \
-            'Usage: install <route> <host> [wrapper args] -- [nixos-anywhere args]' \
+            "Usage: $wrapper_name <route> <host> [wrapper args] -- [nixos-anywhere args]" \
             "" \
             'Wrapper args:' \
             '  --flake <flake-uri>   Override the default flake attr for the target' \
@@ -206,6 +209,7 @@
         explicit_hardware_report=false
         explicit_flake_value=""
         explicit_hardware_backend=""
+        explicit_disko_mode=false
         passthrough_help=false
         for ((i = 0; i < ''${#passthrough_args[@]}; i++)); do
           arg=''${passthrough_args[$i]}
@@ -232,8 +236,23 @@
               fi
               explicit_hardware_backend=''${passthrough_args[$((i + 1))]}
               ;;
+            --disko-mode)
+              explicit_disko_mode=true
+              if (( i + 1 >= ''${#passthrough_args[@]} )); then
+                echo "Missing value for --disko-mode" >&2
+                exit 1
+              fi
+              ;;
+            --disko-mode=*)
+              explicit_disko_mode=true
+              ;;
           esac
         done
+
+        if [[ "$rescue_mode" == true && "$explicit_disko_mode" == true ]]; then
+          echo "Rescue mode always uses nixos-anywhere --disko-mode mount; do not pass --disko-mode explicitly." >&2
+          exit 1
+        fi
 
         normalize_nixos_anywhere_flake() {
           local flake_ref=$1
@@ -314,6 +333,10 @@
           final_args+=(--generate-hardware-config "$hardware_backend" "$hardware_path")
         fi
 
+        if [[ "$rescue_mode" == true ]]; then
+          final_args+=(--disko-mode mount)
+        fi
+
         hardware_check_backend=""
         if [[ "$explicit_hardware_report" == true ]]; then
           hardware_check_backend=$explicit_hardware_backend
@@ -328,7 +351,11 @@
 
         final_args+=("''${passthrough_args[@]}")
 
-        echo "Install target: $host_input"
+        if [[ "$rescue_mode" == true ]]; then
+          echo "Rescue target: $host_input"
+        else
+          echo "Install target: $host_input"
+        fi
         echo "  Route: $route_name"
         echo "  Media: $media"
         echo "  Target host: $target_host"
@@ -356,7 +383,13 @@
 
         nix run ".#install-$media" -- "''${final_args[@]}"
 
-        if [[ "$passthrough_help" != true ]]; then
+        if [[ "$rescue_mode" == true && "$passthrough_help" != true ]]; then
+          printf '%s\n' \
+            "" \
+            'Rescue wrapper note:' \
+            '  Existing disko filesystems were mounted with nixos-anywhere --disko-mode mount before reinstall.' \
+            '  If firmware still does not find the installed system, update or reflash the board firmware payload from the repaired /boot.'
+        elif [[ "$passthrough_help" != true ]]; then
           printf '%s\n' \
             "" \
             'Install wrapper note:' \
@@ -370,7 +403,10 @@
           fi
         fi
       '';
-    };
+      };
+  in {
+    install = mkTargetWrapper "install" false;
+    rescue = mkTargetWrapper "rescue" true;
   });
 
   probeWrapperPackages = genAttrs installMediaLib.supportedBuildSystems (buildSystem: let
@@ -491,7 +527,11 @@
   installTargetApps = genAttrs installMediaLib.supportedBuildSystems (buildSystem: {
     install = {
       type = "app";
-      program = "${installWrapperPackages.${buildSystem}.install}/bin/install";
+      program = "${targetWrapperPackages.${buildSystem}.install}/bin/install";
+    };
+    rescue = {
+      type = "app";
+      program = "${targetWrapperPackages.${buildSystem}.rescue}/bin/rescue";
     };
     probe-hardware = {
       type = "app";
@@ -503,7 +543,8 @@
     buildSystem:
       recursiveUpdate
       {
-        install = installWrapperPackages.${buildSystem}.install;
+        install = targetWrapperPackages.${buildSystem}.install;
+        rescue = targetWrapperPackages.${buildSystem}.rescue;
       }
       {
         probe-hardware = probeWrapperPackages.${buildSystem}.probe-hardware;
