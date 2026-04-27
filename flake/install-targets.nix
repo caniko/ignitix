@@ -1,0 +1,649 @@
+{
+  config,
+  inputs,
+  lib,
+  ...
+}: let
+  inherit
+    (builtins)
+    attrNames
+    toJSON
+    ;
+  inherit
+    (lib)
+    attrByPath
+    concatMapStringsSep
+    escapeShellArg
+    genAttrs
+    mapAttrs
+    mkIf
+    mkMerge
+    mkOption
+    recursiveUpdate
+    splitString
+    types
+    ;
+
+  cfg = config.ignitix.installTargets;
+  hostMetadata = config.ignitix.hostMetadata;
+  installMediaLib = import ../lib {
+    inherit
+      inputs
+      lib
+      ;
+  };
+
+  resolveHostField = hostName: field:
+    attrByPath (splitString "." field) null (hostMetadata.${hostName} or {});
+
+  resolveRouteTargetHost = hostName: target: targetUser: routeName: route: let
+    mediaCfg = attrByPath ["ignitix" "installMedia" target.media] null config;
+    nixosAnywhereCfg = mediaCfg.nixosAnywhere or {};
+  in
+    if route.resolver.type == "hostField"
+    then let
+      value = resolveHostField hostName route.resolver.field;
+    in
+      if value == null
+      then throw "ignitix.installTargets.${hostName}: route '${routeName}' needs host field '${route.resolver.field}'"
+      else "${targetUser}@${value}"
+    else let
+      endpointName = route.resolver.endpoint;
+      endpoint =
+        if endpointName == null
+        then null
+        else nixosAnywhereCfg.endpoints.${endpointName} or null;
+    in
+      if endpoint == null
+      then throw "ignitix.installTargets.${hostName}: missing media endpoint '${endpointName}' for media '${target.media}'"
+      else "${targetUser}@${endpoint.host}";
+
+  resolvedTargets = mapAttrs (hostName: target: let
+    mediaCfg = attrByPath ["ignitix" "installMedia" target.media] null config;
+    nixosAnywhereCfg =
+      if mediaCfg == null
+      then throw "ignitix.installTargets.${hostName}: unknown media '${target.media}'"
+      else mediaCfg.nixosAnywhere;
+    targetUser = nixosAnywhereCfg.targetUser or "root";
+    routes = mapAttrs (routeName: route: {
+      targetHost = resolveRouteTargetHost hostName target targetUser routeName route;
+    }) target.routes;
+  in {
+    app = "install";
+    probeApp = "probe-hardware";
+    flakeUri = ".#${target.flakeAttr}";
+    media = target.media;
+    targetPort = nixosAnywhereCfg.targetPort;
+    sshOptions = nixosAnywhereCfg.sshOptions;
+    inherit routes;
+    hardwareReport = target.hardwareReport;
+  }) cfg;
+
+  renderRouteDescription = hostName: routeName: _: "  ${hostName}: ${routeName}";
+
+  renderAvailableTargets = targets:
+    concatMapStringsSep "\n" (hostName:
+      concatMapStringsSep "\n" (routeName:
+        renderRouteDescription hostName routeName targets.${hostName}.routes.${routeName}
+      ) (attrNames targets.${hostName}.routes)
+    ) (attrNames targets);
+
+  installTargetsJson = toJSON resolvedTargets;
+
+  installWrapperPackages = genAttrs installMediaLib.supportedBuildSystems (buildSystem: let
+    pkgs = inputs.nixpkgs.legacyPackages.${buildSystem};
+    availableTargets = renderAvailableTargets cfg;
+  in {
+    install = pkgs.writeShellApplication {
+      name = "install";
+      runtimeInputs = [
+        pkgs.coreutils
+        pkgs.jq
+        pkgs.nix
+        pkgs.openssh
+      ];
+      text = ''
+        set -euo pipefail
+
+        resolved_targets_json=${escapeShellArg installTargetsJson}
+
+        usage() {
+          printf '%s\n' \
+            'Usage: install <route> <host> [wrapper args] -- [nixos-anywhere args]' \
+            "" \
+            'Wrapper args:' \
+            '  --flake <flake-uri>   Override the default flake attr for the target' \
+            '  --build-on <mode>     Forward nixos-anywhere --build-on' \
+            '  -h, --help            Show this help' \
+            "" \
+            'Available targets:' \
+            '${availableTargets}'
+        }
+
+        if [[ $# -eq 0 || "$1" == "--help" || "$1" == "-h" ]]; then
+          usage
+          exit 0
+        fi
+
+        if [[ $# -lt 2 ]]; then
+          usage >&2
+          exit 1
+        fi
+
+        route_input=$1
+        shift
+        host_input=$1
+        shift
+
+        flake_override=""
+        build_on=""
+        passthrough_args=()
+
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --help|-h)
+              usage
+              exit 0
+              ;;
+            --flake)
+              if [[ $# -lt 2 ]]; then
+                echo "Missing value for --flake" >&2
+                exit 1
+              fi
+              flake_override=$2
+              shift 2
+              ;;
+            --build-on)
+              if [[ $# -lt 2 ]]; then
+                echo "Missing value for --build-on" >&2
+                exit 1
+              fi
+              build_on=$2
+              shift 2
+              ;;
+            --)
+              shift
+              passthrough_args=("$@")
+              break
+              ;;
+            *)
+              echo "Unknown wrapper argument: $1" >&2
+              usage >&2
+              exit 1
+              ;;
+          esac
+        done
+
+        target_json=$(jq -cer --arg host "$host_input" '.[$host]' <<<"$resolved_targets_json") || {
+          echo "Unknown install target: $host_input" >&2
+          usage >&2
+          exit 1
+        }
+
+        route_name=$(jq -r --arg route "$route_input" '
+          if .routes[$route] then
+            $route
+          else
+            empty
+          end
+        ' <<<"$target_json")
+
+        if [[ -z "$route_name" ]]; then
+          echo "Unknown route '$route_input' for target '$host_input'" >&2
+          usage >&2
+          exit 1
+        fi
+
+        target_host=$(jq -r --arg route "$route_name" '.routes[$route].targetHost' <<<"$target_json")
+        media=$(jq -r '.media' <<<"$target_json")
+        target_port=$(jq -r '.targetPort' <<<"$target_json")
+        default_flake=$(jq -r '.flakeUri' <<<"$target_json")
+        hardware_backend=$(jq -r '.hardwareReport.backend // empty' <<<"$target_json")
+        hardware_path=$(jq -r '.hardwareReport.path // empty' <<<"$target_json")
+
+        store_paths_mode=false
+        explicit_flake=false
+        explicit_hardware_report=false
+        explicit_flake_value=""
+        explicit_hardware_backend=""
+        passthrough_help=false
+        for ((i = 0; i < ''${#passthrough_args[@]}; i++)); do
+          arg=''${passthrough_args[$i]}
+          case "$arg" in
+            --help|-h)
+              passthrough_help=true
+              ;;
+            --store-paths|-s)
+              store_paths_mode=true
+              ;;
+            --flake|-f)
+              explicit_flake=true
+              if (( i + 1 >= ''${#passthrough_args[@]} )); then
+                echo "Missing value for $arg" >&2
+                exit 1
+              fi
+              explicit_flake_value=''${passthrough_args[$((i + 1))]}
+              ;;
+            --generate-hardware-config)
+              explicit_hardware_report=true
+              if (( i + 2 >= ''${#passthrough_args[@]} )); then
+                echo "Missing arguments for --generate-hardware-config <backend> <path>" >&2
+                exit 1
+              fi
+              explicit_hardware_backend=''${passthrough_args[$((i + 1))]}
+              ;;
+          esac
+        done
+
+        normalize_nixos_anywhere_flake() {
+          local flake_ref=$1
+
+          if [[ $flake_ref =~ ^(.*)\#([^\#\"]*)$ ]]; then
+            eval_flake_root=''${BASH_REMATCH[1]}
+            eval_flake_attr=''${BASH_REMATCH[2]}
+          else
+            echo "Install preflight needs a flake URI fragment, got '$flake_ref'" >&2
+            exit 1
+          fi
+
+          if [[ -z "$eval_flake_attr" ]]; then
+            echo "Install preflight needs a non-empty flake attribute in '$flake_ref'" >&2
+            exit 1
+          fi
+
+          if [[ $eval_flake_attr != nixosConfigurations.* ]]; then
+            eval_flake_attr="nixosConfigurations.\"$eval_flake_attr\".config"
+          fi
+        }
+
+        ensure_declared_disko_disks_exist() {
+          local flake_ref=$1
+          local declared_disko_disks_json
+          local missing_devices=()
+
+          normalize_nixos_anywhere_flake "$flake_ref"
+
+          declared_disko_disks_json=$(
+            nix eval \
+              --extra-experimental-features 'nix-command flakes' \
+              --json \
+              --apply 'ds: builtins.mapAttrs (_: d: d.device) ds' \
+              "''${eval_flake_root}#''${eval_flake_attr}.disko.devices.disk"
+          ) || {
+            echo "Failed to evaluate disko disk inputs for '$flake_ref'" >&2
+            exit 1
+          }
+
+          local ssh_args=(-T -p "$target_port")
+          while IFS= read -r option; do
+            ssh_args+=(-o "$option")
+          done < <(jq -r '.sshOptions[]?' <<<"$target_json")
+
+          while IFS= read -r device_path; do
+            [[ -n "$device_path" ]] || continue
+
+            printf -v remote_test 'test -b %q' "$device_path"
+            # shellcheck disable=SC2029
+            if ! ssh "''${ssh_args[@]}" "$target_host" "$remote_test"; then
+              missing_devices+=("$device_path")
+            fi
+          done < <(jq -r '.[]' <<<"$declared_disko_disks_json")
+
+          if (( ''${#missing_devices[@]} > 0 )); then
+            echo "Install preflight failed for '$target_host'." >&2
+            echo "The selected flake's disk configuration does not match the probed machine." >&2
+            echo "Missing disko input path(s):" >&2
+            printf '  %s\n' "''${missing_devices[@]}" >&2
+            exit 1
+          fi
+        }
+
+        ensure_remote_nixos_facter() {
+          local ssh_args=(-T -p "$target_port")
+          while IFS= read -r option; do
+            ssh_args+=(-o "$option")
+          done < <(jq -r '.sshOptions[]?' <<<"$target_json")
+
+          if ! ssh "''${ssh_args[@]}" "$target_host" 'command -v nixos-facter >/dev/null'; then
+            printf '%s\n' \
+              "Target '$target_host' does not expose a remote 'nixos-facter' binary." \
+              "The selected media '$media' is expected to bundle nixos-facter for offline probe/install flows." \
+              'Rebuild or reflash that installer media and retry.' >&2
+            exit 1
+          fi
+        }
+
+        final_args=()
+        if [[ "$store_paths_mode" != true && "$explicit_flake" != true ]]; then
+          final_args+=(--flake "''${flake_override:-$default_flake}")
+        fi
+
+        if [[ -n "$build_on" ]]; then
+          final_args+=(--build-on "$build_on")
+        fi
+
+        final_args+=(--target-host "$target_host")
+
+        if [[ -n "$hardware_backend" && -n "$hardware_path" && "$explicit_hardware_report" != true ]]; then
+          mkdir -p "$(dirname "$hardware_path")"
+          final_args+=(--generate-hardware-config "$hardware_backend" "$hardware_path")
+        fi
+
+        hardware_check_backend=""
+        if [[ "$explicit_hardware_report" == true ]]; then
+          hardware_check_backend=$explicit_hardware_backend
+        elif [[ -n "$hardware_backend" && -n "$hardware_path" ]]; then
+          hardware_check_backend=$hardware_backend
+        fi
+
+        check_declared_disko_disks=true
+        if [[ -n "$hardware_check_backend" ]]; then
+          check_declared_disko_disks=false
+        fi
+
+        final_args+=("''${passthrough_args[@]}")
+
+        echo "Install target: $host_input"
+        echo "  Route: $route_name"
+        echo "  Media: $media"
+        echo "  Target host: $target_host"
+        if [[ "$store_paths_mode" != true && "$explicit_flake" != true ]]; then
+          echo "  Flake: ''${flake_override:-$default_flake}"
+        elif [[ "$explicit_flake" == true ]]; then
+          echo "  Flake: provided explicitly in passthrough args"
+        else
+          echo "  Flake: provided via --store-paths"
+        fi
+        if [[ -n "$hardware_backend" && -n "$hardware_path" && "$explicit_hardware_report" != true ]]; then
+          echo "  Hardware report: $hardware_backend -> $hardware_path"
+        fi
+        if [[ "$check_declared_disko_disks" != true && "$passthrough_help" != true ]]; then
+          echo "  Disk preflight: skipped while hardware config generation is active"
+        fi
+        if [[ "$hardware_check_backend" == "nixos-facter" && "$passthrough_help" != true ]]; then
+          ensure_remote_nixos_facter
+        fi
+        if [[ "$store_paths_mode" != true && "$passthrough_help" != true && "$check_declared_disko_disks" == true ]]; then
+          if [[ "$explicit_flake" == true ]]; then
+            install_flake_ref=$explicit_flake_value
+          else
+            install_flake_ref=''${flake_override:-$default_flake}
+          fi
+          ensure_declared_disko_disks_exist "$install_flake_ref"
+        fi
+
+        nix run ".#install-$media" -- "''${final_args[@]}"
+
+        if [[ "$passthrough_help" != true ]]; then
+          printf '%s\n' \
+            "" \
+            'Install wrapper note:' \
+            '  If the machine comes back up in removable installer media, the install likely succeeded but firmware selected the installer again.' \
+            '  Remove the installer media or select internal storage in firmware before the next boot.'
+
+          if [[ "$media" == "rockpro64-installer" ]]; then
+            printf '%s\n' \
+              "  RockPro64 signature for this case: hostname 'rockpro64-installer' with root on '/dev/sda2' labeled 'NIXOS_SD'." \
+              '  Treat that as "booted installer again", not "install failed".'
+          fi
+        fi
+      '';
+    };
+  });
+
+  probeWrapperPackages = genAttrs installMediaLib.supportedBuildSystems (buildSystem: let
+    pkgs = inputs.nixpkgs.legacyPackages.${buildSystem};
+    availableTargets = renderAvailableTargets cfg;
+  in {
+    probe-hardware = pkgs.writeShellApplication {
+      name = "probe-hardware";
+      runtimeInputs = [
+        pkgs.coreutils
+        pkgs.jq
+        pkgs.nix
+        pkgs.openssh
+      ];
+      text = ''
+        set -euo pipefail
+
+        resolved_targets_json=${escapeShellArg installTargetsJson}
+
+        usage() {
+          printf '%s\n' \
+            'Usage: probe-hardware <route> <host> -- [nixos-facter args]' \
+            "" \
+            'The hardware report destination comes from ignitix.installTargets.<host>.hardwareReport.' \
+            "" \
+            'Available targets:' \
+            '${availableTargets}'
+        }
+
+        if [[ $# -eq 0 || "$1" == "--help" || "$1" == "-h" ]]; then
+          usage
+          exit 0
+        fi
+
+        if [[ $# -lt 2 ]]; then
+          usage >&2
+          exit 1
+        fi
+
+        route_input=$1
+        shift
+        host_input=$1
+        shift
+
+        facter_args=()
+        if [[ $# -gt 0 ]]; then
+          if [[ "$1" != "--" ]]; then
+            echo "Unknown wrapper argument: $1" >&2
+            usage >&2
+            exit 1
+          fi
+          shift
+          facter_args=("$@")
+        fi
+
+        target_json=$(jq -cer --arg host "$host_input" '.[$host]' <<<"$resolved_targets_json") || {
+          echo "Unknown install target: $host_input" >&2
+          usage >&2
+          exit 1
+        }
+
+        route_name=$(jq -r --arg route "$route_input" '
+          if .routes[$route] then
+            $route
+          else
+            empty
+          end
+        ' <<<"$target_json")
+
+        if [[ -z "$route_name" ]]; then
+          echo "Unknown route '$route_input' for target '$host_input'" >&2
+          usage >&2
+          exit 1
+        fi
+
+        target_host=$(jq -r --arg route "$route_name" '.routes[$route].targetHost' <<<"$target_json")
+        media=$(jq -r '.media' <<<"$target_json")
+        target_port=$(jq -r '.targetPort' <<<"$target_json")
+        hardware_backend=$(jq -r '.hardwareReport.backend // empty' <<<"$target_json")
+        hardware_path=$(jq -r '.hardwareReport.path // empty' <<<"$target_json")
+
+        if [[ "$hardware_backend" != "nixos-facter" || -z "$hardware_path" ]]; then
+          echo "Target '$host_input' does not define a nixos-facter hardware report destination" >&2
+          exit 1
+        fi
+
+        mkdir -p "$(dirname "$hardware_path")"
+
+        ssh_args=(-T -p "$target_port")
+        while IFS= read -r option; do
+          ssh_args+=(-o "$option")
+        done < <(jq -r '.sshOptions[]?' <<<"$target_json")
+
+        if ! ssh "''${ssh_args[@]}" "$target_host" 'command -v nixos-facter >/dev/null'; then
+          printf '%s\n' \
+            "Target '$target_host' does not expose a remote 'nixos-facter' binary." \
+            "The selected media '$media' is expected to bundle nixos-facter for offline probe/install flows." \
+            'Rebuild or reflash that installer media and retry.' >&2
+          exit 1
+        fi
+
+        remote_cmd=(nixos-facter --ephemeral)
+        remote_cmd+=("''${facter_args[@]}")
+
+        printf -v remote_shell '%q ' "''${remote_cmd[@]}"
+
+        echo "Probing hardware target: $host_input"
+        echo "  Route: $route_name"
+        echo "  Target host: $target_host"
+        echo "  Output: $hardware_path"
+
+        # shellcheck disable=SC2029
+        ssh "''${ssh_args[@]}" "$target_host" "$remote_shell" > "$hardware_path"
+      '';
+    };
+  });
+
+  installTargetApps = genAttrs installMediaLib.supportedBuildSystems (buildSystem: {
+    install = {
+      type = "app";
+      program = "${installWrapperPackages.${buildSystem}.install}/bin/install";
+    };
+    probe-hardware = {
+      type = "app";
+      program = "${probeWrapperPackages.${buildSystem}.probe-hardware}/bin/probe-hardware";
+    };
+  });
+
+  installTargetPackages = genAttrs installMediaLib.supportedBuildSystems (
+    buildSystem:
+      recursiveUpdate
+      {
+        install = installWrapperPackages.${buildSystem}.install;
+      }
+      {
+        probe-hardware = probeWrapperPackages.${buildSystem}.probe-hardware;
+      }
+  );
+in {
+  options.ignitix = {
+    hostMetadata = mkOption {
+      type = types.attrsOf types.anything;
+      default = {};
+      description = ''
+        Consumer-provided host metadata used by hostField route resolvers.
+      '';
+    };
+
+    installTargets = mkOption {
+      type = types.attrsOf (types.submodule ({name, ...}: {
+        options = {
+          flakeAttr = mkOption {
+            type = types.str;
+            default = name;
+            description = ''
+              NixOS configuration attr installed for this target.
+            '';
+          };
+
+          media = mkOption {
+            type = types.str;
+            description = ''
+              Install-media name from ignitix.installMedia used to bootstrap this target.
+            '';
+          };
+
+          routes = mkOption {
+            type = types.attrsOf (types.submodule {
+              options = {
+                resolver = mkOption {
+                  type = types.submodule {
+                    options = {
+                      type = mkOption {
+                        type = types.enum [
+                          "hostField"
+                          "mediaEndpoint"
+                        ];
+                        description = ''
+                          Resolver kind for this semantic route.
+                        '';
+                      };
+
+                      field = mkOption {
+                        type = types.nullOr types.str;
+                        default = null;
+                        description = ''
+                          Dot-separated host field path when type = "hostField".
+                        '';
+                      };
+
+                      endpoint = mkOption {
+                        type = types.nullOr types.str;
+                        default = null;
+                        description = ''
+                          Media endpoint name when type = "mediaEndpoint".
+                        '';
+                      };
+                    };
+                  };
+                  description = ''
+                    Resolver configuration for this route.
+                  '';
+                };
+              };
+            });
+            default = {};
+            description = ''
+              Supported install routes keyed by semantic route name, such as lan or usb.
+            '';
+          };
+
+          hardwareReport = mkOption {
+            type = types.nullOr (types.submodule {
+              options = {
+                backend = mkOption {
+                  type = types.enum [
+                    "nixos-facter"
+                    "nixos-generate-config"
+                  ];
+                  description = ''
+                    Hardware-report backend to run for this install target.
+                  '';
+                };
+
+                path = mkOption {
+                  type = types.str;
+                  description = ''
+                    Local path where the generated hardware report is written.
+                  '';
+                };
+              };
+            });
+            default = null;
+            description = ''
+              Optional hardware-report destination generated automatically during install.
+            '';
+          };
+        };
+      }));
+      default = {};
+      description = ''
+        Host-first install targets for local nix run install/probe-hardware apps.
+      '';
+    };
+  };
+
+  config = mkMerge [
+    {
+      flake = {
+        apps = installTargetApps;
+        packages = installTargetPackages;
+      };
+    }
+    (mkIf (cfg != {}) {
+      flake.installTargetsResolved = resolvedTargets;
+    })
+  ];
+}
