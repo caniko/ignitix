@@ -94,9 +94,9 @@
   targetWrapperPackages = genAttrs installMediaLib.supportedBuildSystems (buildSystem: let
     pkgs = inputs.nixpkgs.legacyPackages.${buildSystem};
     availableTargets = renderAvailableTargets cfg;
-    mkTargetWrapper = wrapperName: rescueMode:
-      pkgs.writeShellApplication {
-        name = wrapperName;
+  in {
+    install = pkgs.writeShellApplication {
+      name = "install";
       runtimeInputs = [
         pkgs.coreutils
         pkgs.jq
@@ -107,12 +107,10 @@
         set -euo pipefail
 
         resolved_targets_json=${escapeShellArg installTargetsJson}
-        wrapper_name=${escapeShellArg wrapperName}
-        rescue_mode=${if rescueMode then "true" else "false"}
 
         usage() {
           printf '%s\n' \
-            "Usage: $wrapper_name <route> <host> [wrapper args] -- [nixos-anywhere args]" \
+            'Usage: install <route> <host> [wrapper args] -- [nixos-anywhere args]' \
             "" \
             'Wrapper args:' \
             '  --flake <flake-uri>   Override the default flake attr for the target' \
@@ -209,7 +207,6 @@
         explicit_hardware_report=false
         explicit_flake_value=""
         explicit_hardware_backend=""
-        explicit_disko_mode=false
         passthrough_help=false
         for ((i = 0; i < ''${#passthrough_args[@]}; i++)); do
           arg=''${passthrough_args[$i]}
@@ -236,23 +233,8 @@
               fi
               explicit_hardware_backend=''${passthrough_args[$((i + 1))]}
               ;;
-            --disko-mode)
-              explicit_disko_mode=true
-              if (( i + 1 >= ''${#passthrough_args[@]} )); then
-                echo "Missing value for --disko-mode" >&2
-                exit 1
-              fi
-              ;;
-            --disko-mode=*)
-              explicit_disko_mode=true
-              ;;
           esac
         done
-
-        if [[ "$rescue_mode" == true && "$explicit_disko_mode" == true ]]; then
-          echo "Rescue mode always uses nixos-anywhere --disko-mode mount; do not pass --disko-mode explicitly." >&2
-          exit 1
-        fi
 
         normalize_nixos_anywhere_flake() {
           local flake_ref=$1
@@ -333,10 +315,6 @@
           final_args+=(--generate-hardware-config "$hardware_backend" "$hardware_path")
         fi
 
-        if [[ "$rescue_mode" == true ]]; then
-          final_args+=(--disko-mode mount)
-        fi
-
         hardware_check_backend=""
         if [[ "$explicit_hardware_report" == true ]]; then
           hardware_check_backend=$explicit_hardware_backend
@@ -351,11 +329,7 @@
 
         final_args+=("''${passthrough_args[@]}")
 
-        if [[ "$rescue_mode" == true ]]; then
-          echo "Rescue target: $host_input"
-        else
-          echo "Install target: $host_input"
-        fi
+        echo "Install target: $host_input"
         echo "  Route: $route_name"
         echo "  Media: $media"
         echo "  Target host: $target_host"
@@ -383,13 +357,7 @@
 
         nix run ".#install-$media" -- "''${final_args[@]}"
 
-        if [[ "$rescue_mode" == true && "$passthrough_help" != true ]]; then
-          printf '%s\n' \
-            "" \
-            'Rescue wrapper note:' \
-            '  Existing disko filesystems were mounted with nixos-anywhere --disko-mode mount before reinstall.' \
-            '  If firmware still does not find the installed system, update or reflash the board firmware payload from the repaired /boot.'
-        elif [[ "$passthrough_help" != true ]]; then
+        if [[ "$passthrough_help" != true ]]; then
           printf '%s\n' \
             "" \
             'Install wrapper note:' \
@@ -403,10 +371,219 @@
           fi
         fi
       '';
-      };
+    };
+  });
+
+  rescueWrapperPackages = genAttrs installMediaLib.supportedBuildSystems (buildSystem: let
+    pkgs = inputs.nixpkgs.legacyPackages.${buildSystem};
+    availableTargets = renderAvailableTargets cfg;
   in {
-    install = mkTargetWrapper "install" false;
-    rescue = mkTargetWrapper "rescue" true;
+    rescue = pkgs.writeShellApplication {
+      name = "rescue";
+      runtimeInputs = [
+        pkgs.coreutils
+        pkgs.jq
+        pkgs.nix
+        pkgs.openssh
+      ];
+      text = ''
+        set -euo pipefail
+
+        resolved_targets_json=${escapeShellArg installTargetsJson}
+
+        usage() {
+          printf '%s\n' \
+            'Usage: rescue <route> <host> [wrapper args]' \
+            "" \
+            'Mount an existing disko installation and run nixos-install into it.' \
+            "" \
+            'Wrapper args:' \
+            '  --flake <flake-uri>   Override the default flake attr for the target' \
+            '  --build-on local      Build rescue artifacts locally before copying them' \
+            '  -h, --help            Show this help' \
+            "" \
+            'Available targets:' \
+            '${availableTargets}'
+        }
+
+        if [[ $# -eq 0 || "$1" == "--help" || "$1" == "-h" ]]; then
+          usage
+          exit 0
+        fi
+
+        if [[ $# -lt 2 ]]; then
+          usage >&2
+          exit 1
+        fi
+
+        route_input=$1
+        shift
+        host_input=$1
+        shift
+
+        flake_override=""
+        build_on="local"
+
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --help|-h)
+              usage
+              exit 0
+              ;;
+            --flake)
+              if [[ $# -lt 2 ]]; then
+                echo "Missing value for --flake" >&2
+                exit 1
+              fi
+              flake_override=$2
+              shift 2
+              ;;
+            --build-on)
+              if [[ $# -lt 2 ]]; then
+                echo "Missing value for --build-on" >&2
+                exit 1
+              fi
+              build_on=$2
+              shift 2
+              ;;
+            --)
+              shift
+              if [[ $# -gt 0 ]]; then
+                echo "Rescue does not accept passthrough arguments." >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "Unknown rescue argument: $1" >&2
+              usage >&2
+              exit 1
+              ;;
+          esac
+        done
+
+        if [[ "$build_on" != "local" ]]; then
+          echo "Rescue currently supports only --build-on local." >&2
+          exit 1
+        fi
+
+        target_json=$(jq -cer --arg host "$host_input" '.[$host]' <<<"$resolved_targets_json") || {
+          echo "Unknown install target: $host_input" >&2
+          usage >&2
+          exit 1
+        }
+
+        route_name=$(jq -r --arg route "$route_input" '
+          if .routes[$route] then
+            $route
+          else
+            empty
+          end
+        ' <<<"$target_json")
+
+        if [[ -z "$route_name" ]]; then
+          echo "Unknown route '$route_input' for target '$host_input'" >&2
+          usage >&2
+          exit 1
+        fi
+
+        target_host=$(jq -r --arg route "$route_name" '.routes[$route].targetHost' <<<"$target_json")
+        media=$(jq -r '.media' <<<"$target_json")
+        target_port=$(jq -r '.targetPort' <<<"$target_json")
+        default_flake=$(jq -r '.flakeUri' <<<"$target_json")
+        rescue_flake=''${flake_override:-$default_flake}
+
+        normalize_nixos_config_flake() {
+          local flake_ref=$1
+
+          if [[ $flake_ref =~ ^(.*)\#([^\#\"]*)$ ]]; then
+            eval_flake_root=''${BASH_REMATCH[1]}
+            eval_flake_attr=''${BASH_REMATCH[2]}
+          else
+            echo "Rescue needs a flake URI fragment, got '$flake_ref'" >&2
+            exit 1
+          fi
+
+          if [[ -z "$eval_flake_attr" ]]; then
+            echo "Rescue needs a non-empty flake attribute in '$flake_ref'" >&2
+            exit 1
+          fi
+
+          if [[ $eval_flake_attr != nixosConfigurations.* ]]; then
+            eval_flake_attr="nixosConfigurations.\"$eval_flake_attr\".config"
+          fi
+        }
+
+        normalize_nixos_config_flake "$rescue_flake"
+
+        ssh_args=(-T -p "$target_port")
+        nix_ssh_opts="-p $target_port"
+        while IFS= read -r option; do
+          ssh_args+=(-o "$option")
+          nix_ssh_opts+=" -o $option"
+        done < <(jq -r '.sshOptions[]?' <<<"$target_json")
+
+        if ! ssh "''${ssh_args[@]}" "$target_host" 'command -v nixos-install >/dev/null'; then
+          printf '%s\n' \
+            "Target '$target_host' does not expose 'nixos-install'." \
+            "Boot into installer media '$media' and retry rescue." >&2
+          exit 1
+        fi
+
+        echo "Rescue target: $host_input"
+        echo "  Route: $route_name"
+        echo "  Media: $media"
+        echo "  Target host: $target_host"
+        echo "  Flake: $rescue_flake"
+        echo "  Mode: mount existing disko layout and run nixos-install"
+
+        mount_script=$(
+          nix build \
+            --extra-experimental-features 'nix-command flakes' \
+            --no-link \
+            --print-out-paths \
+            "$eval_flake_root#$eval_flake_attr.system.build.mount"
+        ) || {
+          echo "Failed to build disko mount script for '$rescue_flake'." >&2
+          exit 1
+        }
+
+        system_path=$(
+          nix build \
+            --extra-experimental-features 'nix-command flakes' \
+            --no-link \
+            --print-out-paths \
+            "$eval_flake_root#$eval_flake_attr.system.build.toplevel"
+        ) || {
+          echo "Failed to build NixOS system for '$rescue_flake'." >&2
+          exit 1
+        }
+
+        echo "  Mount script: $mount_script"
+        echo "  System: $system_path"
+        echo "Copying rescue closure to $target_host"
+        NIX_SSHOPTS="$nix_ssh_opts" nix-copy-closure --to "$target_host" "$mount_script" "$system_path"
+
+        printf -v remote_mount_script '%q' "$mount_script"
+        printf -v remote_system_path '%q' "$system_path"
+        remote_script=$(cat <<EOF
+        set -euo pipefail
+        mkdir -p /mnt
+        $remote_mount_script
+        nixos-install --root /mnt --system $remote_system_path --no-channel-copy --no-root-password
+EOF
+        )
+
+        echo "Mounting existing disko layout and installing system on $target_host"
+        # shellcheck disable=SC2029
+        ssh "''${ssh_args[@]}" "$target_host" "$remote_script"
+
+        printf '%s\n' \
+          "" \
+          'Rescue complete:' \
+          '  Existing disko filesystems were mounted under /mnt.' \
+          '  The selected NixOS system was installed into that mounted root.'
+      '';
+    };
   });
 
   probeWrapperPackages = genAttrs installMediaLib.supportedBuildSystems (buildSystem: let
@@ -531,7 +708,7 @@
     };
     rescue = {
       type = "app";
-      program = "${targetWrapperPackages.${buildSystem}.rescue}/bin/rescue";
+      program = "${rescueWrapperPackages.${buildSystem}.rescue}/bin/rescue";
     };
     probe-hardware = {
       type = "app";
@@ -544,7 +721,7 @@
       recursiveUpdate
       {
         install = targetWrapperPackages.${buildSystem}.install;
-        rescue = targetWrapperPackages.${buildSystem}.rescue;
+        rescue = rescueWrapperPackages.${buildSystem}.rescue;
       }
       {
         probe-hardware = probeWrapperPackages.${buildSystem}.probe-hardware;
