@@ -490,6 +490,8 @@
         media=$(jq -r '.media' <<<"$target_json")
         target_port=$(jq -r '.targetPort' <<<"$target_json")
         default_flake=$(jq -r '.flakeUri' <<<"$target_json")
+        hardware_backend=$(jq -r '.hardwareReport.backend // empty' <<<"$target_json")
+        hardware_path=$(jq -r '.hardwareReport.path // empty' <<<"$target_json")
         rescue_flake=''${flake_override:-$default_flake}
 
         normalize_nixos_config_flake() {
@@ -535,6 +537,39 @@
         echo "  Target host: $target_host"
         echo "  Flake: $rescue_flake"
         echo "  Mode: mount existing disko layout and run nixos-install"
+
+        if [[ -n "$hardware_backend" || -n "$hardware_path" ]]; then
+          if [[ "$hardware_backend" != "nixos-facter" || -z "$hardware_path" ]]; then
+            echo "Rescue supports only complete nixos-facter hardware reports." >&2
+            exit 1
+          fi
+
+          if ! ssh "''${ssh_args[@]}" "$target_host" 'command -v nixos-facter >/dev/null'; then
+            printf '%s\n' \
+              "Target '$target_host' does not expose 'nixos-facter'." \
+              "The selected media '$media' is expected to bundle nixos-facter for rescue fact refreshes." \
+              'Rebuild or reflash that installer media and retry.' >&2
+            exit 1
+          fi
+
+          mkdir -p "$(dirname "$hardware_path")"
+          hardware_tmp=$(mktemp "''${hardware_path}.tmp.XXXXXX")
+          trap 'rm -f "$hardware_tmp"' EXIT
+
+          echo "Refreshing hardware report: $hardware_backend -> $hardware_path"
+          # shellcheck disable=SC2029
+          ssh "''${ssh_args[@]}" "$target_host" nixos-facter > "$hardware_tmp"
+          if [[ ! -s "$hardware_tmp" ]]; then
+            echo "Remote nixos-facter produced an empty hardware report." >&2
+            exit 1
+          fi
+          jq empty "$hardware_tmp" || {
+            echo "Remote nixos-facter produced invalid JSON." >&2
+            exit 1
+          }
+          mv "$hardware_tmp" "$hardware_path"
+          trap - EXIT
+        fi
 
         mount_script=$(
           nix build \
