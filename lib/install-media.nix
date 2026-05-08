@@ -219,7 +219,13 @@
 ${lib.optionalString (ipv4Gateway != null) ''
           ${pkgs.iproute2}/bin/ip route replace default via ${ipv4Gateway} dev ${interfaceName}${lib.optionalString (ipv4RouteMetric != null) " metric ${ipv4RouteMetric}"}
 ''}${lib.optionalString (ipv4Dns != null) ''
-          ${pkgs.systemd}/bin/resolvectl dns ${interfaceName} ${ipv4Dns}
+          if ${pkgs.systemd}/bin/systemctl -q is-active systemd-resolved.service; then
+            ${pkgs.systemd}/bin/resolvectl dns ${interfaceName} ${ipv4Dns}
+          elif [ -x ${pkgs.openresolv}/bin/resolvconf ]; then
+            printf 'nameserver %s\n' ${lib.escapeShellArg ipv4Dns} | ${pkgs.openresolv}/bin/resolvconf -a ${interfaceName}
+          else
+            printf 'nameserver %s\n' ${lib.escapeShellArg ipv4Dns} > /etc/resolv.conf
+          fi
 ''}
         fi
       '';
