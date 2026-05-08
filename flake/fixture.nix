@@ -100,5 +100,18 @@ in {
 
       touch "$out"
     '';
+
+    checks.split-disko-trust-layer = pkgs.runCommand "split-disko-trust-layer" {
+      nativeBuildInputs = [
+        pkgs.bash
+        pkgs.coreutils
+        pkgs.gawk
+        pkgs.gnugrep
+        pkgs.jq
+      ];
+    } ''
+      TRUST_LAYER=${./split-disko-trust-layer.sh} \
+        bash ${./split-disko-trust-layer-test.sh}
+    '';
   };
 }
