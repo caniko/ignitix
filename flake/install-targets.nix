@@ -299,60 +299,17 @@
           fi
         }
 
-        final_args=()
-        if [[ "$store_paths_mode" != true && "$explicit_flake" != true ]]; then
-          final_args+=(--flake "''${flake_override:-$default_flake}")
-        fi
-
-        if [[ -n "$build_on" ]]; then
-          final_args+=(--build-on "$build_on")
-        fi
-
-        final_args+=(--target-host "$target_host")
-
-        if [[ -n "$hardware_backend" && -n "$hardware_path" && "$explicit_hardware_report" != true ]]; then
-          mkdir -p "$(dirname "$hardware_path")"
-          final_args+=(--generate-hardware-config "$hardware_backend" "$hardware_path")
-        fi
-
-        hardware_check_backend=""
-        if [[ "$explicit_hardware_report" == true ]]; then
-          hardware_check_backend=$explicit_hardware_backend
-        elif [[ -n "$hardware_backend" && -n "$hardware_path" ]]; then
-          hardware_check_backend=$hardware_backend
-        fi
-
-        check_declared_disko_disks=true
-        if [[ -n "$hardware_check_backend" ]]; then
-          check_declared_disko_disks=false
-        fi
-
-        final_args+=("''${passthrough_args[@]}")
-
-        echo "Install target: $host_input"
-        echo "  Route: $route_name"
-        echo "  Media: $media"
-        echo "  Target host: $target_host"
-        if [[ "$store_paths_mode" != true && "$explicit_flake" != true ]]; then
-          echo "  Flake: ''${flake_override:-$default_flake}"
-        elif [[ "$explicit_flake" == true ]]; then
-          echo "  Flake: provided explicitly in passthrough args"
-        else
-          echo "  Flake: provided via --store-paths"
-        fi
-        if [[ -n "$hardware_backend" && -n "$hardware_path" && "$explicit_hardware_report" != true ]]; then
-          echo "  Hardware report: $hardware_backend -> $hardware_path"
-        fi
-        if [[ "$check_declared_disko_disks" != true && "$passthrough_help" != true ]]; then
-          echo "  Disk preflight: skipped while hardware config generation is active"
-        fi
         # Pre-flight hardware report refresh. nixos-anywhere with a disko
         # config has to evaluate the flake before its own
         # --generate-hardware-config step, so a stale report blocks the
         # install — even though the report would have been regenerated a
-        # moment later. We refresh here, ahead of any eval, so the install
-        # is idempotent against stale facter data (e.g. an SD card not
-        # populated when the report was last captured).
+        # moment later. nixos-anywhere also builds nixos-facter for the
+        # *target* platform when running --generate-hardware-config, which
+        # cross-fails on a same-arch-required builder. We refresh here,
+        # ahead of any eval, using the binary already present on the
+        # installer media; that makes the install idempotent against stale
+        # reports AND avoids the cross-build entirely.
+        pre_refresh_done=false
         if [[ "$store_paths_mode" != true \
            && "$explicit_hardware_report" != true \
            && "$hardware_backend" == "nixos-facter" \
@@ -389,6 +346,64 @@
           }
           mv "$hardware_tmp" "$hardware_path"
           trap - EXIT
+          pre_refresh_done=true
+        fi
+
+        final_args=()
+        if [[ "$store_paths_mode" != true && "$explicit_flake" != true ]]; then
+          final_args+=(--flake "''${flake_override:-$default_flake}")
+        fi
+
+        if [[ -n "$build_on" ]]; then
+          final_args+=(--build-on "$build_on")
+        fi
+
+        final_args+=(--target-host "$target_host")
+
+        # Only ask nixos-anywhere to generate the hardware config when we
+        # didn't already do it above. Avoids redundant work and the
+        # cross-build that nixos-anywhere's own facter step requires.
+        if [[ -n "$hardware_backend" && -n "$hardware_path" \
+           && "$explicit_hardware_report" != true \
+           && "$pre_refresh_done" != true ]]; then
+          mkdir -p "$(dirname "$hardware_path")"
+          final_args+=(--generate-hardware-config "$hardware_backend" "$hardware_path")
+        fi
+
+        hardware_check_backend=""
+        if [[ "$explicit_hardware_report" == true ]]; then
+          hardware_check_backend=$explicit_hardware_backend
+        elif [[ -n "$hardware_backend" && -n "$hardware_path" && "$pre_refresh_done" != true ]]; then
+          hardware_check_backend=$hardware_backend
+        fi
+
+        check_declared_disko_disks=true
+        if [[ -n "$hardware_check_backend" ]]; then
+          check_declared_disko_disks=false
+        fi
+
+        final_args+=("''${passthrough_args[@]}")
+
+        echo "Install target: $host_input"
+        echo "  Route: $route_name"
+        echo "  Media: $media"
+        echo "  Target host: $target_host"
+        if [[ "$store_paths_mode" != true && "$explicit_flake" != true ]]; then
+          echo "  Flake: ''${flake_override:-$default_flake}"
+        elif [[ "$explicit_flake" == true ]]; then
+          echo "  Flake: provided explicitly in passthrough args"
+        else
+          echo "  Flake: provided via --store-paths"
+        fi
+        if [[ -n "$hardware_backend" && -n "$hardware_path" && "$explicit_hardware_report" != true ]]; then
+          if [[ "$pre_refresh_done" == true ]]; then
+            echo "  Hardware report: $hardware_backend -> $hardware_path (pre-refreshed)"
+          else
+            echo "  Hardware report: $hardware_backend -> $hardware_path"
+          fi
+        fi
+        if [[ "$check_declared_disko_disks" != true && "$passthrough_help" != true ]]; then
+          echo "  Disk preflight: skipped while hardware config generation is active"
         fi
 
         if [[ "$store_paths_mode" != true && "$passthrough_help" != true && "$check_declared_disko_disks" == true ]]; then
