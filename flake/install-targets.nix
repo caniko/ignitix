@@ -391,7 +391,7 @@
           NIX_SSHOPTS="$ssh_opts" nix copy \
             --extra-experimental-features 'nix-command flakes' \
             --no-check-sigs \
-            --from "ssh://$target_host?compress=true" \
+            --from "$remote_store_uri" \
             "$disko_script_path" || {
               echo "Failed to copy disko script '$disko_script_path' from '$target_host'." >&2
               exit 1

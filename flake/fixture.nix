@@ -90,6 +90,7 @@ in {
       grep -F 'auto|local|remote|split)' "$wrapper" >/dev/null
       grep -F 'final_args+=(--store-paths "$split_disko_script_path" "$split_system_path")' "$wrapper" >/dev/null
       grep -F '[[ -n "$build_on" && "$build_on" != "split" ]]' "$wrapper" >/dev/null
+      grep -F -- '--from "$remote_store_uri"' "$wrapper" >/dev/null
 
       touch "$out"
     '';
