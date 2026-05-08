@@ -413,6 +413,7 @@
         pre_refresh_done=false
         if [[ "$store_paths_mode" != true \
            && "$explicit_hardware_report" != true \
+           && "$passthrough_help" != true \
            && "$hardware_backend" == "nixos-facter" \
            && -n "$hardware_path" ]]; then
           refresh_ssh_args=(-T -p "$target_port")
