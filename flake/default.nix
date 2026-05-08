@@ -14,6 +14,7 @@ in {
     ./fixture.nix
     ./install-media.nix
     ./install-targets.nix
+    ./site.nix
   ];
 
   flake = {

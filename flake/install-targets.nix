@@ -346,6 +346,51 @@
         if [[ "$check_declared_disko_disks" != true && "$passthrough_help" != true ]]; then
           echo "  Disk preflight: skipped while hardware config generation is active"
         fi
+        # Pre-flight hardware report refresh. nixos-anywhere with a disko
+        # config has to evaluate the flake before its own
+        # --generate-hardware-config step, so a stale report blocks the
+        # install — even though the report would have been regenerated a
+        # moment later. We refresh here, ahead of any eval, so the install
+        # is idempotent against stale facter data (e.g. an SD card not
+        # populated when the report was last captured).
+        if [[ "$store_paths_mode" != true \
+           && "$explicit_hardware_report" != true \
+           && "$hardware_backend" == "nixos-facter" \
+           && -n "$hardware_path" ]]; then
+          refresh_ssh_args=(-T -p "$target_port")
+          while IFS= read -r option; do
+            refresh_ssh_args+=(-o "$option")
+          done < <(jq -r '.sshOptions[]?' <<<"$target_json")
+
+          # shellcheck disable=SC2029
+          if ! ssh "''${refresh_ssh_args[@]}" "$target_host" 'command -v nixos-facter >/dev/null'; then
+            printf '%s\n' \
+              "Target '$target_host' does not expose 'nixos-facter'." \
+              "The selected media '$media' is expected to bundle nixos-facter for install fact refreshes." \
+              'Rebuild or reflash that installer media (or pass a fresh report explicitly via --generate-hardware-config) and retry.' >&2
+            exit 1
+          fi
+
+          mkdir -p "$(dirname "$hardware_path")"
+          hardware_tmp=$(mktemp "''${hardware_path}.tmp.XXXXXX")
+          # shellcheck disable=SC2064
+          trap 'rm -f "'"$hardware_tmp"'"' EXIT
+
+          echo "Pre-install hardware refresh: $hardware_backend -> $hardware_path"
+          # shellcheck disable=SC2029
+          ssh "''${refresh_ssh_args[@]}" "$target_host" nixos-facter > "$hardware_tmp"
+          if [[ ! -s "$hardware_tmp" ]]; then
+            echo "Remote nixos-facter produced an empty hardware report." >&2
+            exit 1
+          fi
+          jq empty "$hardware_tmp" || {
+            echo "Remote nixos-facter produced invalid JSON." >&2
+            exit 1
+          }
+          mv "$hardware_tmp" "$hardware_path"
+          trap - EXIT
+        fi
+
         if [[ "$store_paths_mode" != true && "$passthrough_help" != true && "$check_declared_disko_disks" == true ]]; then
           if [[ "$explicit_flake" == true ]]; then
             install_flake_ref=$explicit_flake_value
@@ -374,6 +419,204 @@
     };
   });
 
+  smountWrapperPackages = genAttrs installMediaLib.supportedBuildSystems (buildSystem: let
+    pkgs = inputs.nixpkgs.legacyPackages.${buildSystem};
+    availableTargets = renderAvailableTargets cfg;
+  in {
+    smount = pkgs.writeShellApplication {
+      name = "smount";
+      runtimeInputs = [
+        pkgs.coreutils
+        pkgs.jq
+        pkgs.nix
+        pkgs.openssh
+      ];
+      text = ''
+        set -euo pipefail
+
+        resolved_targets_json=${escapeShellArg installTargetsJson}
+
+        usage() {
+          printf '%s\n' \
+            'Usage: smount <route> <host> [wrapper args]' \
+            "" \
+            'Mount an existing disko installation through installer media.' \
+            "" \
+            'Wrapper args:' \
+            '  --flake <flake-uri>   Override the default flake attr for the target' \
+            '  --build-on local      Build mount artifacts locally before copying them' \
+            '  -h, --help            Show this help' \
+            "" \
+            'Available targets:' \
+            '${availableTargets}'
+        }
+
+        if [[ $# -eq 0 || "$1" == "--help" || "$1" == "-h" ]]; then
+          usage
+          exit 0
+        fi
+
+        if [[ $# -lt 2 ]]; then
+          usage >&2
+          exit 1
+        fi
+
+        route_input=$1
+        shift
+        host_input=$1
+        shift
+
+        flake_override=""
+        build_on="local"
+
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --help|-h)
+              usage
+              exit 0
+              ;;
+            --flake)
+              if [[ $# -lt 2 ]]; then
+                echo "Missing value for --flake" >&2
+                exit 1
+              fi
+              flake_override=$2
+              shift 2
+              ;;
+            --build-on)
+              if [[ $# -lt 2 ]]; then
+                echo "Missing value for --build-on" >&2
+                exit 1
+              fi
+              build_on=$2
+              shift 2
+              ;;
+            --)
+              shift
+              if [[ $# -gt 0 ]]; then
+                echo "Smount does not accept passthrough arguments." >&2
+                exit 1
+              fi
+              ;;
+            *)
+              echo "Unknown smount argument: $1" >&2
+              usage >&2
+              exit 1
+              ;;
+          esac
+        done
+
+        if [[ "$build_on" != "local" ]]; then
+          echo "Smount currently supports only --build-on local." >&2
+          exit 1
+        fi
+
+        target_json=$(jq -cer --arg host "$host_input" '.[$host]' <<<"$resolved_targets_json") || {
+          echo "Unknown install target: $host_input" >&2
+          usage >&2
+          exit 1
+        }
+
+        route_name=$(jq -r --arg route "$route_input" '
+          if .routes[$route] then
+            $route
+          else
+            empty
+          end
+        ' <<<"$target_json")
+
+        if [[ -z "$route_name" ]]; then
+          echo "Unknown route '$route_input' for target '$host_input'" >&2
+          usage >&2
+          exit 1
+        fi
+
+        target_host=$(jq -r --arg route "$route_name" '.routes[$route].targetHost' <<<"$target_json")
+        media=$(jq -r '.media' <<<"$target_json")
+        target_port=$(jq -r '.targetPort' <<<"$target_json")
+        default_flake=$(jq -r '.flakeUri' <<<"$target_json")
+        smount_flake=''${flake_override:-$default_flake}
+
+        normalize_nixos_config_flake() {
+          local flake_ref=$1
+
+          if [[ $flake_ref =~ ^(.*)\#([^\#\"]*)$ ]]; then
+            eval_flake_root=''${BASH_REMATCH[1]}
+            eval_flake_attr=''${BASH_REMATCH[2]}
+          else
+            echo "Smount needs a flake URI fragment, got '$flake_ref'" >&2
+            exit 1
+          fi
+
+          if [[ -z "$eval_flake_attr" ]]; then
+            echo "Smount needs a non-empty flake attribute in '$flake_ref'" >&2
+            exit 1
+          fi
+
+          if [[ $eval_flake_attr != nixosConfigurations.* ]]; then
+            eval_flake_attr="nixosConfigurations.\"$eval_flake_attr\".config"
+          fi
+        }
+
+        normalize_nixos_config_flake "$smount_flake"
+
+        ssh_args=(-T -p "$target_port")
+        nix_ssh_opts="-p $target_port"
+        while IFS= read -r option; do
+          ssh_args+=(-o "$option")
+          nix_ssh_opts+=" -o $option"
+        done < <(jq -r '.sshOptions[]?' <<<"$target_json")
+
+        if ! ssh "''${ssh_args[@]}" "$target_host" 'command -v nixos-install >/dev/null'; then
+          printf '%s\n' \
+            "Target '$target_host' does not expose 'nixos-install'." \
+            "Boot into installer media '$media' and retry smount." >&2
+          exit 1
+        fi
+
+        echo "Smount target: $host_input"
+        echo "  Route: $route_name"
+        echo "  Media: $media"
+        echo "  Target host: $target_host"
+        echo "  Flake: $smount_flake"
+        echo "  Mode: mount existing disko layout"
+
+        mount_script=$(
+          nix build \
+            --extra-experimental-features 'nix-command flakes' \
+            --no-link \
+            --print-out-paths \
+            "$eval_flake_root#$eval_flake_attr.system.build.mountNoDeps"
+        ) || {
+          echo "Failed to build disko mount script for '$smount_flake'." >&2
+          exit 1
+        }
+
+        echo "  Mount script: $mount_script"
+        echo "Copying disko mount script to $target_host"
+        NIX_SSHOPTS="$nix_ssh_opts" nix-copy-closure --to "$target_host" "$mount_script"
+
+        printf -v remote_mount_script '%q' "$mount_script/bin/disko-mount"
+        remote_mount=$(cat <<EOF
+        set -euo pipefail
+        mkdir -p /mnt
+        $remote_mount_script
+        test -d /mnt/nix/store
+EOF
+        )
+
+        echo "Mounting existing disko layout on $target_host"
+        # shellcheck disable=SC2029
+        ssh "''${ssh_args[@]}" "$target_host" "$remote_mount"
+
+        printf '%s\n' \
+          "" \
+          'Smount complete:' \
+          '  Existing disko filesystems were mounted under /mnt.'
+      '';
+    };
+  });
+
   rescueWrapperPackages = genAttrs installMediaLib.supportedBuildSystems (buildSystem: let
     pkgs = inputs.nixpkgs.legacyPackages.${buildSystem};
     availableTargets = renderAvailableTargets cfg;
@@ -390,6 +633,7 @@
         set -euo pipefail
 
         resolved_targets_json=${escapeShellArg installTargetsJson}
+        smount_program=${escapeShellArg "${smountWrapperPackages.${buildSystem}.smount}/bin/smount"}
 
         usage() {
           printf '%s\n' \
@@ -524,13 +768,6 @@
           nix_ssh_opts+=" -o $option"
         done < <(jq -r '.sshOptions[]?' <<<"$target_json")
 
-        if ! ssh "''${ssh_args[@]}" "$target_host" 'command -v nixos-install >/dev/null'; then
-          printf '%s\n' \
-            "Target '$target_host' does not expose 'nixos-install'." \
-            "Boot into installer media '$media' and retry rescue." >&2
-          exit 1
-        fi
-
         echo "Rescue target: $host_input"
         echo "  Route: $route_name"
         echo "  Media: $media"
@@ -571,17 +808,6 @@
           trap - EXIT
         fi
 
-        mount_script=$(
-          nix build \
-            --extra-experimental-features 'nix-command flakes' \
-            --no-link \
-            --print-out-paths \
-            "$eval_flake_root#$eval_flake_attr.system.build.mountNoDeps"
-        ) || {
-          echo "Failed to build disko mount script for '$rescue_flake'." >&2
-          exit 1
-        }
-
         system_path=$(
           nix build \
             --extra-experimental-features 'nix-command flakes' \
@@ -593,24 +819,11 @@
           exit 1
         }
 
-        echo "  Mount script: $mount_script"
         echo "  System: $system_path"
-        echo "Copying disko mount script to $target_host"
-        NIX_SSHOPTS="$nix_ssh_opts" nix-copy-closure --to "$target_host" "$mount_script"
 
-        printf -v remote_mount_script '%q' "$mount_script"
+        "$smount_program" "$route_input" "$host_input" --flake "$rescue_flake" --build-on "$build_on"
+
         printf -v remote_system_path '%q' "$system_path"
-        remote_mount=$(cat <<EOF
-        set -euo pipefail
-        mkdir -p /mnt
-        $remote_mount_script
-        test -d /mnt/nix/store
-EOF
-        )
-
-        echo "Mounting existing disko layout on $target_host"
-        # shellcheck disable=SC2029
-        ssh "''${ssh_args[@]}" "$target_host" "$remote_mount"
 
         remote_store_host=$target_host
         if [[ "$target_port" != "22" ]]; then
@@ -767,6 +980,10 @@ EOF
       type = "app";
       program = "${rescueWrapperPackages.${buildSystem}.rescue}/bin/rescue";
     };
+    smount = {
+      type = "app";
+      program = "${smountWrapperPackages.${buildSystem}.smount}/bin/smount";
+    };
     probe-hardware = {
       type = "app";
       program = "${probeWrapperPackages.${buildSystem}.probe-hardware}/bin/probe-hardware";
@@ -779,6 +996,7 @@ EOF
       {
         install = targetWrapperPackages.${buildSystem}.install;
         rescue = rescueWrapperPackages.${buildSystem}.rescue;
+        smount = smountWrapperPackages.${buildSystem}.smount;
       }
       {
         probe-hardware = probeWrapperPackages.${buildSystem}.probe-hardware;

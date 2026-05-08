@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}{{ section.title }}{% endblock title %}
+
+{% block content %}
+<section class="hero">
+  <div class="hero-inner">
+    <p class="eyebrow">NixOS install tooling</p>
+    <h1>{{ section.title }}</h1>
+    <p class="tagline">{{ section.extra.tagline }}</p>
+    <p class="subtitle">{{ section.extra.subtitle }}</p>
+    <div class="actions">
+      <a class="button primary" href="{{ config.base_url }}/docs/">Read the docs</a>
+      <a class="button secondary" href="https://codeberg.org/caniko/ignitix">View source</a>
+    </div>
+  </div>
+</section>
+
+<section class="quickstart" aria-labelledby="quickstart-title">
+  <div class="section-inner split">
+    <div>
+      <p class="eyebrow">Start here</p>
+      <h2 id="quickstart-title">Build the project outputs</h2>
+    </div>
+    <pre><code>{{ section.extra.install }}</code></pre>
+  </div>
+</section>
+
+<section class="features" aria-labelledby="features-title">
+  <div class="section-inner">
+    <p class="eyebrow">Capabilities</p>
+    <h2 id="features-title">Installer workflows as flake outputs</h2>
+    <div class="feature-grid">
+      {% for feature in section.extra.features %}
+        <article class="feature">
+          <h3>{{ feature.title }}</h3>
+          <p>{{ feature.body }}</p>
+        </article>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+{% endblock content %}
+
