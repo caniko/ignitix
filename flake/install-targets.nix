@@ -390,6 +390,7 @@
           echo "Split build: copying disko script from installer"
           NIX_SSHOPTS="$ssh_opts" nix copy \
             --extra-experimental-features 'nix-command flakes' \
+            --no-check-sigs \
             --from "ssh://$target_host?compress=true" \
             "$disko_script_path" || {
               echo "Failed to copy disko script '$disko_script_path' from '$target_host'." >&2
