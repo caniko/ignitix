@@ -92,6 +92,8 @@ in {
       grep -F '[[ -n "$build_on" && "$build_on" != "split" ]]' "$wrapper" >/dev/null
       grep -F 'verify_or_repair_remote_disko_closure "$disko_script_path"' "$wrapper" >/dev/null
       grep -F 'collect_remote_closure_mismatches()' "$wrapper" >/dev/null
+      grep -F 'Refusing to derive expected hash from actual path contents.' "$wrapper" >/dev/null
+      grep -F 'registered NAR hash:' "$wrapper" >/dev/null
       grep -F 'nix-store -qR %q' "$wrapper" >/dev/null
       grep -F 'nix-store --repair-path %q' "$wrapper" >/dev/null
       grep -F -- '--from "$remote_store_uri"' "$wrapper" >/dev/null
