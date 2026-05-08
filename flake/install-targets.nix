@@ -452,7 +452,7 @@
 
         split_disko_script_path=""
         split_system_path=""
-        if [[ "$build_on" == "split" ]]; then
+        if [[ "$build_on" == "split" && "$passthrough_help" != true ]]; then
           if [[ "$store_paths_mode" == true ]]; then
             echo "--build-on split cannot be combined with passthrough --store-paths." >&2
             exit 1
@@ -467,7 +467,7 @@
         fi
 
         final_args=()
-        if [[ "$build_on" == "split" ]]; then
+        if [[ "$build_on" == "split" && "$passthrough_help" != true ]]; then
           final_args+=(--store-paths "$split_disko_script_path" "$split_system_path")
         elif [[ "$store_paths_mode" != true && "$explicit_flake" != true ]]; then
           final_args+=(--flake "''${flake_override:-$default_flake}")
