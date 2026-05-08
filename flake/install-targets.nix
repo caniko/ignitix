@@ -114,7 +114,7 @@
             "" \
             'Wrapper args:' \
             '  --flake <flake-uri>   Override the default flake attr for the target' \
-            '  --build-on <mode>     Forward nixos-anywhere --build-on' \
+            '  --build-on <mode>     Build mode: local, remote, auto, or split' \
             '  -h, --help            Show this help' \
             "" \
             'Available targets:' \
@@ -159,6 +159,14 @@
                 echo "Missing value for --build-on" >&2
                 exit 1
               fi
+              case "$2" in
+                auto|local|remote|split) ;;
+                *)
+                  echo "Unsupported --build-on mode: $2" >&2
+                  echo "Expected one of: auto, local, remote, split" >&2
+                  exit 1
+                  ;;
+              esac
               build_on=$2
               shift 2
               ;;
@@ -299,6 +307,99 @@
           fi
         }
 
+        installer_ssh_args=()
+        build_installer_ssh_args() {
+          installer_ssh_args=(-T -p "$target_port")
+          while IFS= read -r option; do
+            installer_ssh_args+=(-o "$option")
+          done < <(jq -r '.sshOptions[]?' <<<"$target_json")
+        }
+
+        check_installer_free_space() {
+          local required_kib=524288
+          local available_kib
+          local df_output
+
+          build_installer_ssh_args
+          df_output=$(ssh "''${installer_ssh_args[@]}" "$target_host" 'df -Pk /nix 2>/dev/null || df -Pk /') || {
+            echo "Failed to check free space on installer '$target_host'." >&2
+            exit 1
+          }
+          available_kib=$(awk 'NR == 2 { print $4 }' <<<"$df_output")
+
+          if [[ -z "$available_kib" || ! "$available_kib" =~ ^[0-9]+$ ]]; then
+            echo "Failed to parse installer free-space report from '$target_host'." >&2
+            printf '%s\n' "$df_output" >&2
+            exit 1
+          fi
+
+          if (( available_kib < required_kib )); then
+            printf '%s\n' \
+              "Installer '$target_host' does not have enough free space for split install builds." \
+              "Required: at least 512 MiB free on /nix or /." \
+              "" \
+              "Current installer disk usage:" >&2
+            ssh "''${installer_ssh_args[@]}" "$target_host" 'df -h / /nix 2>/dev/null || df -h /' >&2 || true
+            printf '%s\n' \
+              "" \
+              "Try cleaning the installer store, then retry:" \
+              "  ssh $target_host 'nix-store --gc; df -h / /nix'" >&2
+            exit 1
+          fi
+        }
+
+        build_split_store_paths() {
+          local flake_ref=$1
+          local system_path
+          local disko_script_path
+          local ssh_opts
+          local remote_store_uri
+
+          normalize_nixos_anywhere_flake "$flake_ref"
+          check_installer_free_space
+
+          echo "Split build: building NixOS system locally"
+          system_path=$(
+            nix build \
+              --extra-experimental-features 'nix-command flakes' \
+              --print-out-paths \
+              --no-link \
+              "''${eval_flake_root}#''${eval_flake_attr}.system.build.toplevel"
+          ) || {
+            echo "Failed to build NixOS system for '$flake_ref'." >&2
+            exit 1
+          }
+
+          ssh_opts=$(printf '%q ' "''${installer_ssh_args[@]}")
+          remote_store_uri="ssh-ng://$target_host?compress=true"
+
+          echo "Split build: building disko script on installer"
+          disko_script_path=$(
+            NIX_SSHOPTS="$ssh_opts" nix build \
+              --extra-experimental-features 'nix-command flakes' \
+              --print-out-paths \
+              --no-link \
+              --eval-store auto \
+              --store "$remote_store_uri" \
+              "''${eval_flake_root}#''${eval_flake_attr}.system.build.diskoScriptNoDeps"
+          ) || {
+            echo "Failed to build disko script for '$flake_ref' on '$target_host'." >&2
+            exit 1
+          }
+
+          echo "Split build: copying disko script from installer"
+          NIX_SSHOPTS="$ssh_opts" nix copy \
+            --extra-experimental-features 'nix-command flakes' \
+            --from "ssh://$target_host?compress=true" \
+            "$disko_script_path" || {
+              echo "Failed to copy disko script '$disko_script_path' from '$target_host'." >&2
+              exit 1
+            }
+
+          split_disko_script_path=$disko_script_path
+          split_system_path=$system_path
+        }
+
         # Pre-flight hardware report refresh. nixos-anywhere with a disko
         # config has to evaluate the flake before its own
         # --generate-hardware-config step, so a stale report blocks the
@@ -349,12 +450,30 @@
           pre_refresh_done=true
         fi
 
+        split_disko_script_path=""
+        split_system_path=""
+        if [[ "$build_on" == "split" ]]; then
+          if [[ "$store_paths_mode" == true ]]; then
+            echo "--build-on split cannot be combined with passthrough --store-paths." >&2
+            exit 1
+          fi
+          if [[ "$explicit_flake" == true ]]; then
+            install_flake_ref=$explicit_flake_value
+          else
+            install_flake_ref=''${flake_override:-$default_flake}
+          fi
+          build_split_store_paths "$install_flake_ref"
+          store_paths_mode=true
+        fi
+
         final_args=()
-        if [[ "$store_paths_mode" != true && "$explicit_flake" != true ]]; then
+        if [[ "$build_on" == "split" ]]; then
+          final_args+=(--store-paths "$split_disko_script_path" "$split_system_path")
+        elif [[ "$store_paths_mode" != true && "$explicit_flake" != true ]]; then
           final_args+=(--flake "''${flake_override:-$default_flake}")
         fi
 
-        if [[ -n "$build_on" ]]; then
+        if [[ -n "$build_on" && "$build_on" != "split" ]]; then
           final_args+=(--build-on "$build_on")
         fi
 

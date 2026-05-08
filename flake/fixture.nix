@@ -87,6 +87,9 @@ in {
       wrapper=${self'.packages.install}/bin/install
       grep -F '.#example-crossbow' "$wrapper" >/dev/null
       grep -F 'final_args+=(--flake "''${flake_override:-$default_flake}")' "$wrapper" >/dev/null
+      grep -F 'auto|local|remote|split)' "$wrapper" >/dev/null
+      grep -F 'final_args+=(--store-paths "$split_disko_script_path" "$split_system_path")' "$wrapper" >/dev/null
+      grep -F '[[ -n "$build_on" && "$build_on" != "split" ]]' "$wrapper" >/dev/null
 
       touch "$out"
     '';
