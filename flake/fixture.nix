@@ -90,6 +90,14 @@ in {
       grep -F 'auto|local|remote|split)' "$wrapper" >/dev/null
       grep -F 'final_args+=(--store-paths "$split_disko_script_path" "$split_system_path")' "$wrapper" >/dev/null
       grep -F '[[ -n "$build_on" && "$build_on" != "split" ]]' "$wrapper" >/dev/null
+      grep -F 'target_host_platform()' "$wrapper" >/dev/null
+      grep -F 'reject_unsafe_bcache_phases' "$wrapper" >/dev/null
+      grep -F 'cfg.disko.devices.bcache or {} != {}' "$wrapper" >/dev/null
+      grep -F 'skips disko formatting' "$wrapper" >/dev/null
+      grep -F 'apply_native_build_defaults "''${flake_override:-$default_flake}"' "$wrapper" >/dev/null
+      grep -F 'ensure_local_binfmt_for "$target_system"' "$wrapper" >/dev/null
+      grep -F "boot.binfmt.emulatedSystems" "$wrapper" >/dev/null
+      grep -F 'passthrough_args=(--option extra-platforms "$target_system" "''${passthrough_args[@]}")' "$wrapper" >/dev/null
       grep -F 'verify_or_repair_remote_disko_closure "$disko_script_path"' "$wrapper" >/dev/null
       grep -F 'collect_remote_closure_mismatches()' "$wrapper" >/dev/null
       grep -F 'Refusing to derive expected hash from actual path contents.' "$wrapper" >/dev/null

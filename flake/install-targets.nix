@@ -245,6 +245,20 @@
           esac
         done
 
+        local_system() {
+          case "$(uname -m)" in
+            x86_64)
+              echo x86_64-linux
+              ;;
+            aarch64|arm64)
+              echo aarch64-linux
+              ;;
+            *)
+              return 1
+              ;;
+          esac
+        }
+
         normalize_nixos_anywhere_flake() {
           local flake_ref=$1
 
@@ -263,6 +277,186 @@
 
           if [[ $eval_flake_attr != nixosConfigurations.* ]]; then
             eval_flake_attr="nixosConfigurations.\"$eval_flake_attr\".config"
+          fi
+        }
+
+        target_host_platform() {
+          local flake_ref=$1
+          normalize_nixos_anywhere_flake "$flake_ref"
+
+          nix eval \
+            --extra-experimental-features 'nix-command flakes' \
+            --raw \
+            "''${eval_flake_root}#''${eval_flake_attr}.nixpkgs.hostPlatform.system"
+        }
+
+        target_has_bcache() {
+          local flake_ref=$1
+          normalize_nixos_anywhere_flake "$flake_ref"
+
+          nix eval \
+            --extra-experimental-features 'nix-command flakes' \
+            --json \
+            --apply 'cfg: cfg.disko.devices.bcache or {} != {}' \
+            "''${eval_flake_root}#''${eval_flake_attr}"
+        }
+
+        passthrough_has_extra_platforms() {
+          local i=0
+          while (( i < ''${#passthrough_args[@]} )); do
+            if [[ "''${passthrough_args[$i]}" == "--option" \
+               && $((i + 1)) -lt ''${#passthrough_args[@]} \
+               && "''${passthrough_args[$((i + 1))]}" == "extra-platforms" ]]; then
+              return 0
+            fi
+            i=$((i + 1))
+          done
+          return 1
+        }
+
+        phases_include_install_without_disko() {
+          local phases=$1
+          local has_install=false
+          local has_disko=false
+          local phase
+
+          IFS=',' read -ra phase_list <<<"$phases"
+          for phase in "''${phase_list[@]}"; do
+            case "$phase" in
+              install)
+                has_install=true
+                ;;
+              disko)
+                has_disko=true
+                ;;
+            esac
+          done
+
+          [[ "$has_install" == true && "$has_disko" != true ]]
+        }
+
+        reject_unsafe_bcache_phases() {
+          local install_flake_ref=$1
+          local has_bcache
+          local i=0
+          local phases=""
+
+          has_bcache=$(target_has_bcache "$install_flake_ref") || {
+            echo "Failed to evaluate whether '$install_flake_ref' uses disko bcache." >&2
+            exit 1
+          }
+          [[ "$has_bcache" == true ]] || return 0
+
+          while (( i < ''${#passthrough_args[@]} )); do
+            case "''${passthrough_args[$i]}" in
+              --phases)
+                if [[ $((i + 1)) -ge ''${#passthrough_args[@]} ]]; then
+                  echo "Missing value for --phases" >&2
+                  exit 1
+                fi
+                phases="''${passthrough_args[$((i + 1))]}"
+                ;;
+              --phases=*)
+                phases="''${passthrough_args[$i]#--phases=}"
+                ;;
+            esac
+
+            if [[ -n "$phases" ]] && phases_include_install_without_disko "$phases"; then
+              printf '%s\n' \
+                "Refusing unsafe bcache install phases '$phases' for '$install_flake_ref'." \
+                "--phases install,reboot skips disko formatting, so bcache members are left without superblocks and /dev/bcache0 cannot assemble." \
+                "Omit --phases or use: --phases kexec,disko,install,reboot" >&2
+              exit 1
+            fi
+
+            i=$((i + 1))
+          done
+        }
+
+        passthrough_requests_remote_build() {
+          local i=0
+          while (( i < ''${#passthrough_args[@]} )); do
+            case "''${passthrough_args[$i]}" in
+              --build-on-remote)
+                return 0
+                ;;
+              --build-on)
+                if [[ $((i + 1)) -lt ''${#passthrough_args[@]} \
+                   && "''${passthrough_args[$((i + 1))]}" == "remote" ]]; then
+                  return 0
+                fi
+                i=$((i + 2))
+                continue
+                ;;
+            esac
+            i=$((i + 1))
+          done
+          return 1
+        }
+
+        binfmt_handler_for() {
+          case "$1" in
+            aarch64-linux)
+              echo qemu-aarch64
+              ;;
+            *)
+              return 1
+              ;;
+          esac
+        }
+
+        ensure_local_binfmt_for() {
+          local target_system=$1
+          local handler
+          local handler_path
+
+          handler=$(binfmt_handler_for "$target_system") || return 0
+          handler_path="/proc/sys/fs/binfmt_misc/$handler"
+
+          if [[ ! -e "$handler_path" ]]; then
+            printf '%s\n' \
+              "Local build for $target_system requires binfmt handler '$handler', but $handler_path is missing." \
+              "Rebuild this local builder with boot.binfmt.emulatedSystems = [\"$target_system\"]; then verify: cat $handler_path" >&2
+            exit 1
+          fi
+
+          if ! grep -Fx enabled "$handler_path" >/dev/null; then
+            printf '%s\n' \
+              "Local build for $target_system requires enabled binfmt handler '$handler', but $handler_path is disabled." \
+              "Rebuild this local builder with boot.binfmt.emulatedSystems = [\"$target_system\"]; then verify: cat $handler_path" >&2
+            exit 1
+          fi
+        }
+
+        apply_native_build_defaults() {
+          local install_flake_ref=$1
+          local target_system
+          local current_system
+
+          target_system=$(target_host_platform "$install_flake_ref") || {
+            echo "Failed to evaluate target platform for '$install_flake_ref'." >&2
+            exit 1
+          }
+          current_system=$(local_system) || {
+            echo "Unsupported local architecture: $(uname -m)" >&2
+            exit 1
+          }
+
+          if [[ "$target_system" == "$current_system" ]]; then
+            return
+          fi
+
+          if [[ "$build_on" == "remote" || "$build_on" == "split" ]] || passthrough_requests_remote_build; then
+            return
+          fi
+
+          build_on=local
+          if [[ "$passthrough_help" != true ]]; then
+            ensure_local_binfmt_for "$target_system"
+          fi
+
+          if ! passthrough_has_extra_platforms; then
+            passthrough_args=(--option extra-platforms "$target_system" "''${passthrough_args[@]}")
           fi
         }
 
@@ -405,6 +599,18 @@
           split_disko_script_path=$disko_script_path
           split_system_path=$system_path
         }
+
+        if [[ "$store_paths_mode" != true && "$explicit_flake" != true ]]; then
+          apply_native_build_defaults "''${flake_override:-$default_flake}"
+        fi
+
+        if [[ "$store_paths_mode" != true ]]; then
+          if [[ "$explicit_flake" == true ]]; then
+            reject_unsafe_bcache_phases "$explicit_flake_value"
+          else
+            reject_unsafe_bcache_phases "''${flake_override:-$default_flake}"
+          fi
+        fi
 
         # Pre-flight hardware report refresh. nixos-anywhere with a disko
         # config has to evaluate the flake before its own
