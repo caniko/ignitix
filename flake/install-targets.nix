@@ -397,7 +397,7 @@
         binfmt_handler_for() {
           case "$1" in
             aarch64-linux)
-              echo qemu-aarch64
+              echo aarch64-linux
               ;;
             *)
               return 1
