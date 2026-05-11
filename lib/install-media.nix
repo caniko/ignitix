@@ -285,12 +285,17 @@ ${lib.optionalString (ipv4Gateway != null) ''
               openssh.authorizedKeys.keys = rootAuthorizedKeys;
             };
 
-            users.users.nixos.initialHashedPassword = mkForce "!";
+            users.users.nixos = {
+              initialHashedPassword = mkForce null;
+              initialPassword = mkForce "nixos";
+            };
 
             services.getty = {
               autologinUser = mkForce null;
               helpLine = mkForce ''
-                Login as "root" locally or over SSH using an authorized public key.
+                Login locally as "nixos" (password: "nixos") for on-host work,
+                or as "root" over SSH using an authorized public key.
+                The "nixos" account cannot log in over SSH.
                 Wired networking is managed by NetworkManager and should come up via DHCP automatically.
               '';
             };
@@ -301,6 +306,7 @@ ${lib.optionalString (ipv4Gateway != null) ''
                 PasswordAuthentication = mkForce false;
                 KbdInteractiveAuthentication = mkForce false;
                 PermitRootLogin = mkForce "prohibit-password";
+                DenyUsers = ["nixos"];
               };
             };
           })
