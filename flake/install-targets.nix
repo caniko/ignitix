@@ -1582,13 +1582,54 @@ EOF
           jq -nc --arg error "$1" '{ok:false,error:$error}'
         }
 
+        resolve_mounted_path() {
+          local current=$1
+          local target
+          local depth=0
+
+          while [[ -L "$current" && "$depth" -lt 20 ]]; do
+            if ! target=$(readlink "$current" 2>/dev/null); then
+              return 1
+            fi
+
+            if [[ "$target" == /* ]]; then
+              current="/mnt$target"
+            else
+              current="$(dirname "$current")/$target"
+            fi
+
+            depth=$((depth + 1))
+          done
+
+          [[ "$depth" -lt 20 ]] || return 1
+          printf '%s\n' "$current"
+        }
+
+        installed_system_path() {
+          resolve_mounted_path /mnt/nix/var/nix/profiles/system
+        }
+
+        installed_kernel_path() {
+          local system_path
+          system_path=$(installed_system_path) || return 1
+          resolve_mounted_path "$system_path/kernel"
+        }
+
+        installed_modules_root() {
+          local system_path
+          local modules_path
+          system_path=$(installed_system_path) || return 1
+          modules_path=$(resolve_mounted_path "$system_path/kernel-modules") || return 1
+          printf '%s\n' "$modules_path/lib/modules"
+        }
+
         mounted_system_root=/mnt
         target_host=''${TARGET_HOST:-}
         target_route=''${TARGET_ROUTE:-}
         tool_version=''${TARGET_VERSION:-0.1.0}
         generated_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-        if [[ -e /mnt/run/booted-system/kernel && -d /mnt/nix/store ]]; then
+        if [[ -L /mnt/nix/var/nix/profiles/system && -d /mnt/nix/store ]]; then
           context_mode=mounted
         else
           context_mode=live-only
@@ -1629,12 +1670,13 @@ EOF
             return
           fi
 
-          if ! kernel_path=$(readlink -f /mnt/run/booted-system/kernel 2>/dev/null); then
+          if ! kernel_path=$(installed_kernel_path); then
             json_fail "installed kernel path unavailable"
             return
           fi
 
-          modules_dir=$(find /mnt/run/booted-system/kernel-modules/lib/modules -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | head -n1)
+          modules_root=$(installed_modules_root 2>/dev/null || true)
+          modules_dir=$(find "$modules_root" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | head -n1)
           if [[ -z "$modules_dir" ]]; then
             json_fail "installed kernel release unavailable"
             return
@@ -1664,7 +1706,8 @@ EOF
             return
           fi
 
-          modules_dir=$(find /mnt/run/booted-system/kernel-modules/lib/modules -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | head -n1)
+          modules_root=$(installed_modules_root 2>/dev/null || true)
+          modules_dir=$(find "$modules_root" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | head -n1)
           if [[ -z "$modules_dir" ]]; then
             json_fail "bcache module path missing"
             return
@@ -1702,9 +1745,10 @@ EOF
             return
           fi
 
-          modules_dir=$(find /mnt/run/booted-system/kernel-modules/lib/modules -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | head -n1)
+          modules_root=$(installed_modules_root 2>/dev/null || true)
+          modules_dir=$(find "$modules_root" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | head -n1)
           if [[ -z "$modules_dir" ]]; then
-            json_fail "modinfo failed for /mnt/run/booted-system/kernel-modules/lib/modules/*/kernel/drivers/md/bcache/bcache.ko"
+            json_fail "modinfo failed for installed kernel modules tree */kernel/drivers/md/bcache/bcache.ko"
             return
           fi
 
@@ -1718,11 +1762,11 @@ EOF
           done
 
           if [[ -z "$module_path" ]]; then
-            json_fail "modinfo failed for /mnt/run/booted-system/kernel-modules/lib/modules/*/kernel/drivers/md/bcache/bcache.ko"
+            json_fail "modinfo failed for installed kernel modules tree */kernel/drivers/md/bcache/bcache.ko"
             return
           fi
 
-          if ! modinfo_output=$(modinfo --file "$module_path" 2>/dev/null); then
+          if ! modinfo_output=$(modinfo "$module_path" 2>/dev/null); then
             json_fail "modinfo failed for $module_path"
             return
           fi
@@ -2055,12 +2099,12 @@ EOF
           fi
 
           link=/mnt/nix/var/nix/profiles/system
-          if [[ ! -e "$link" ]]; then
+          if [[ ! -e "$link" && ! -L "$link" ]]; then
             json_fail "cannot resolve /mnt/nix/var/nix/profiles/system"
             return
           fi
 
-          if ! target=$(readlink -f "$link" 2>/dev/null); then
+          if ! target=$(installed_system_path); then
             json_fail "cannot resolve /mnt/nix/var/nix/profiles/system"
             return
           fi
