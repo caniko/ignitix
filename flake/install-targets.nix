@@ -1318,6 +1318,860 @@ EOF
     };
   });
 
+  diskDiagnoseWrapperPackages = genAttrs installMediaLib.supportedBuildSystems (buildSystem: let
+    pkgs = inputs.nixpkgs.legacyPackages.${buildSystem};
+    availableTargets = renderAvailableTargets cfg;
+  in {
+    disk-diagnose = pkgs.writeShellApplication {
+      name = "disk-diagnose";
+      runtimeInputs = [
+        pkgs.coreutils
+        pkgs.jq
+        pkgs.nix
+        pkgs.openssh
+      ];
+      text = ''
+        set -euo pipefail
+
+        resolved_targets_json=${escapeShellArg installTargetsJson}
+        smount_program=${escapeShellArg "${smountWrapperPackages.${buildSystem}.smount}/bin/smount"}
+
+        usage() {
+          printf '%s\n' \
+            'Usage: disk-diagnose <route> <host> [wrapper args]' \
+            "" \
+            'Collect a schema-v1 disk diagnosis report from boot media.' \
+            "" \
+            'Wrapper args:' \
+            '  --with-smount        Run smount before probing (default)' \
+            '  --no-mount           Skip smount and probe live media only' \
+            '  --flake <flake-uri>  Override the default flake attr for the target' \
+            '  --build-on local     Build mount artifacts locally before copying them' \
+            '  -h, --help           Show this help' \
+            "" \
+            'Available targets:' \
+            '${availableTargets}'
+        }
+
+        build_failure_report() {
+          local probe_log=$1
+          local message=$2
+          local generated_at
+          generated_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          jq -nc \
+            --arg generated_at "$generated_at" \
+            --arg target_host "$host_input" \
+            --arg target_route "$route_name" \
+            --arg probe_log "$probe_log" \
+            --arg message "$message" \
+            '{
+              schema_version: "1",
+              generated_at: $generated_at,
+              tool: {
+                name: "disk-diagnose",
+                version: "0.1.0"
+              },
+              target: {
+                host: $target_host,
+                route: $target_route
+              },
+              context: {
+                mode: "live-only",
+                mounted_system_root: "/mnt"
+              },
+              bootmedia: {
+                kernel: {
+                  ok: false,
+                  error: $message
+                }
+              },
+              installed: {
+                kernel: {
+                  ok: false,
+                  error: $message
+                },
+                bcache_module: {
+                  path: {
+                    ok: false,
+                    error: $message
+                  },
+                  modinfo: {
+                    ok: false,
+                    error: $message
+                  }
+                },
+                modprobe_d: [
+                  {
+                    path: "/mnt/etc/modprobe.d",
+                    ok: false,
+                    error: $message
+                  }
+                ],
+                bcache_super: [],
+                system_profile: {
+                  ok: false,
+                  error: $message
+                }
+              },
+              live: {
+                modprobe: {
+                  bcache: {
+                    ok: false,
+                    error: $message
+                  }
+                },
+                dmesg: {
+                  bcache: {
+                    ok: false,
+                    error: $message
+                  }
+                }
+              },
+              disks: {
+                lsblk: {
+                  ok: false,
+                  error: $message
+                },
+                by_partlabel: {
+                  ok: false,
+                  error: $message
+                },
+                gpt: [
+                  {
+                    device: "/dev/mmcblk0",
+                    ok: false,
+                    error: $message
+                  },
+                  {
+                    device: "/dev/mmcblk1",
+                    ok: false,
+                    error: $message
+                  }
+                ],
+                blkid: []
+              },
+              probe_log: $probe_log
+            }'
+        }
+
+        if [[ $# -eq 0 || "$1" == "--help" || "$1" == "-h" ]]; then
+          usage
+          exit 0
+        fi
+
+        if [[ $# -lt 2 ]]; then
+          usage >&2
+          exit 1
+        fi
+
+        route_input=$1
+        shift
+        host_input=$1
+        shift
+
+        flake_override=""
+        build_on="local"
+        with_smount=true
+        no_mount=false
+
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            --help|-h)
+              usage
+              exit 0
+              ;;
+            --flake)
+              if [[ $# -lt 2 ]]; then
+                echo "Missing value for --flake" >&2
+                exit 1
+              fi
+              flake_override=$2
+              shift 2
+              ;;
+            --build-on)
+              if [[ $# -lt 2 ]]; then
+                echo "Missing value for --build-on" >&2
+                exit 1
+              fi
+              if [[ "$2" != "local" ]]; then
+                echo "Disk-diagnose currently supports only --build-on local." >&2
+                exit 1
+              fi
+              build_on=$2
+              shift 2
+              ;;
+            --with-smount)
+              with_smount=true
+              no_mount=false
+              shift
+              ;;
+            --no-mount)
+              no_mount=true
+              with_smount=false
+              shift
+              ;;
+            --)
+              echo "Disk-diagnose does not accept passthrough arguments." >&2
+              exit 1
+              ;;
+            *)
+              echo "Unknown disk-diagnose argument: $1" >&2
+              usage >&2
+              exit 1
+              ;;
+          esac
+        done
+
+        target_json=$(jq -cer --arg host "$host_input" '.[$host]' <<<"$resolved_targets_json") || {
+          echo "Unknown install target: $host_input" >&2
+          usage >&2
+          exit 1
+        }
+
+        route_name=$(jq -r --arg route "$route_input" '
+          if .routes[$route] then
+            $route
+          else
+            empty
+          end
+        ' <<<"$target_json")
+
+        if [[ -z "$route_name" ]]; then
+          echo "Unknown route '$route_input' for target '$host_input'" >&2
+          usage >&2
+          exit 1
+        fi
+
+        target_host=$(jq -r --arg route "$route_name" '.routes[$route].targetHost' <<<"$target_json")
+        media=$(jq -r '.media' <<<"$target_json")
+        target_port=$(jq -r '.targetPort' <<<"$target_json")
+        default_flake=$(jq -r '.flakeUri' <<<"$target_json")
+        disk_diagnose_flake=''${flake_override:-$default_flake}
+
+        ssh_args=(-T -p "$target_port")
+        while IFS= read -r option; do
+          ssh_args+=(-o "$option")
+        done < <(jq -r '.sshOptions[]?' <<<"$target_json")
+
+        echo "Disk-diagnose target: $host_input" >&2
+        echo "  Route: $route_name" >&2
+        echo "  Media: $media" >&2
+        echo "  Target host: $target_host" >&2
+        echo "  Flake: $disk_diagnose_flake" >&2
+
+        if [[ "$with_smount" == true && "$no_mount" == false ]]; then
+          echo "Running smount preflight" >&2
+          if ! "$smount_program" "$route_input" "$host_input" --flake "$disk_diagnose_flake" --build-on "$build_on" >&2; then
+            echo "smount preflight failed; rerun with --no-mount to inspect live media only." >&2
+            build_failure_report "" "smount preflight failed"
+            exit 1
+          fi
+        fi
+
+        remote_cmd=$(printf 'TARGET_HOST=%q TARGET_ROUTE=%q TARGET_VERSION=%q bash -s' "$host_input" "$route_name" "0.1.0")
+        remote_stderr_file=$(mktemp)
+        trap 'rm -f "$remote_stderr_file"' EXIT
+
+        if remote_json=$(
+          # shellcheck disable=SC2029
+          ssh "''${ssh_args[@]}" "$target_host" "$remote_cmd" 2>"$remote_stderr_file" <<'EOF'
+        set -uo pipefail
+        export PATH=/run/current-system/sw/bin:/run/wrappers/bin
+
+        json_fail() {
+          jq -nc --arg error "$1" '{ok:false,error:$error}'
+        }
+
+        mounted_system_root=/mnt
+        target_host=''${TARGET_HOST:-}
+        target_route=''${TARGET_ROUTE:-}
+        tool_version=''${TARGET_VERSION:-0.1.0}
+        generated_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+        if [[ -e /mnt/run/booted-system/kernel && -d /mnt/nix/store ]]; then
+          context_mode=mounted
+        else
+          context_mode=live-only
+        fi
+
+        by_partlabel_entries_json=$(
+          if [[ -d /dev/disk/by-partlabel ]]; then
+            find /dev/disk/by-partlabel -mindepth 1 -maxdepth 1 -printf '%f\t%l\n' |
+              while IFS=$'\t' read -r label target; do
+                [[ -n "$label" ]] || continue
+                path="/dev/disk/by-partlabel/$label"
+                resolved_device=$(readlink -f "$path" 2>/dev/null || true)
+                jq -nc --arg label "$label" --arg path "$path" --arg target "$target" --arg resolved_device "$resolved_device" '{
+                  name: $label,
+                  path: $path,
+                  target: $target,
+                  resolved_device: $resolved_device
+                }'
+              done | jq -cs '.'
+          else
+            echo '[]'
+          fi
+        )
+
+        probe_bootmedia_kernel() {
+          if command -v uname >/dev/null 2>&1; then
+            if release=$(uname -r 2>/dev/null); then
+              jq -nc --arg release "$release" '{ok:true,release:$release}'
+              return
+            fi
+          fi
+          json_fail "uname -r failed"
+        }
+
+        probe_installed_kernel() {
+          if [[ "$context_mode" != mounted ]]; then
+            json_fail "installed system not mounted at /mnt"
+            return
+          fi
+
+          if ! kernel_path=$(readlink -f /mnt/run/booted-system/kernel 2>/dev/null); then
+            json_fail "installed kernel path unavailable"
+            return
+          fi
+
+          modules_dir=$(find /mnt/run/booted-system/kernel-modules/lib/modules -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | head -n1)
+          if [[ -z "$modules_dir" ]]; then
+            json_fail "installed kernel release unavailable"
+            return
+          fi
+
+          release=$(basename "$modules_dir")
+          builtin_first_line=""
+          if [[ -f "$modules_dir/modules.builtin" ]]; then
+            builtin_first_line=$(head -n1 "$modules_dir/modules.builtin" 2>/dev/null || true)
+          fi
+
+          jq -nc \
+            --arg kernel_path "$kernel_path" \
+            --arg release "$release" \
+            --arg modules_builtin_first_line "$builtin_first_line" \
+            '{
+              ok: true,
+              kernel_path: $kernel_path,
+              release: $release,
+              modules_builtin_first_line: $modules_builtin_first_line
+            }'
+        }
+
+        probe_installed_bcache_module_path() {
+          if [[ "$context_mode" != mounted ]]; then
+            json_fail "installed system not mounted at /mnt"
+            return
+          fi
+
+          modules_dir=$(find /mnt/run/booted-system/kernel-modules/lib/modules -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | head -n1)
+          if [[ -z "$modules_dir" ]]; then
+            json_fail "bcache module path missing"
+            return
+          fi
+
+          module_dir="$modules_dir/kernel/drivers/md/bcache"
+          module_path=""
+          for candidate in "$module_dir/bcache.ko" "$module_dir/bcache.ko.xz" "$module_dir/bcache.ko.zst"; do
+            if [[ -e "$candidate" ]]; then
+              module_path=$candidate
+              break
+            fi
+          done
+
+          if [[ -z "$module_path" ]]; then
+            json_fail "bcache module path missing"
+            return
+          fi
+
+          jq -nc \
+            --arg module_dir "$module_dir" \
+            --arg module_path "$module_path" \
+            --argjson exists true \
+            '{
+              ok: true,
+              module_dir: $module_dir,
+              module_path: $module_path,
+              exists: $exists
+            }'
+        }
+
+        probe_installed_bcache_module_modinfo() {
+          if [[ "$context_mode" != mounted ]]; then
+            json_fail "installed system not mounted at /mnt"
+            return
+          fi
+
+          modules_dir=$(find /mnt/run/booted-system/kernel-modules/lib/modules -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | head -n1)
+          if [[ -z "$modules_dir" ]]; then
+            json_fail "modinfo failed for /mnt/run/booted-system/kernel-modules/lib/modules/*/kernel/drivers/md/bcache/bcache.ko"
+            return
+          fi
+
+          module_dir="$modules_dir/kernel/drivers/md/bcache"
+          module_path=""
+          for candidate in "$module_dir/bcache.ko" "$module_dir/bcache.ko.xz" "$module_dir/bcache.ko.zst"; do
+            if [[ -e "$candidate" ]]; then
+              module_path=$candidate
+              break
+            fi
+          done
+
+          if [[ -z "$module_path" ]]; then
+            json_fail "modinfo failed for /mnt/run/booted-system/kernel-modules/lib/modules/*/kernel/drivers/md/bcache/bcache.ko"
+            return
+          fi
+
+          if ! modinfo_output=$(modinfo --file "$module_path" 2>/dev/null); then
+            json_fail "modinfo failed for $module_path"
+            return
+          fi
+
+          raw_json=$(jq -Rn --arg text "$modinfo_output" '
+            [($text | split("\n")[] | select(length > 0))
+             | capture("^(?<k>[^:]+):[[:space:]]*(?<v>.*)$")]
+            | reduce .[] as $kv ({alias: [], parm: []};
+                if $kv.k == "alias" or $kv.k == "parm" then
+                  .[$kv.k] += [$kv.v]
+                else
+                  .[$kv.k] = $kv.v
+                end
+              )
+            | {
+                filename: (.filename // ""),
+                name: (.name // ""),
+                license: (.license // ""),
+                description: (.description // ""),
+                author: (.author // ""),
+                alias: (.alias // []),
+                depends: (.depends // ""),
+                retpoline: (.retpoline // ""),
+                intree: (.intree // ""),
+                vermagic: (.vermagic // ""),
+                parm: (.parm // []),
+                srcversion: (.srcversion // "")
+              }
+          ')
+
+          depends_json=$(jq -nc --arg depends "$(jq -r '.depends' <<<"$raw_json")" '$depends | split(",") | map(select(length > 0))')
+
+          jq -nc \
+            --arg file "$module_path" \
+            --argjson raw "$raw_json" \
+            --argjson depends "$depends_json" \
+            --arg srcversion "$(jq -r '.srcversion' <<<"$raw_json")" \
+            '{
+              ok: true,
+              file: $file,
+              vermagic: $raw.vermagic,
+              depends: $depends,
+              srcversion: $srcversion,
+              raw: $raw
+            }'
+        }
+
+        probe_live_modprobe_bcache() {
+          if ! command -v modprobe >/dev/null 2>&1; then
+            json_fail "tool-missing"
+            return
+          fi
+
+          stdout_file=$(mktemp)
+          stderr_file=$(mktemp)
+          if modprobe bcache >"$stdout_file" 2>"$stderr_file"; then
+            status=0
+          else
+            status=$?
+          fi
+
+          stdout=$(cat "$stdout_file" 2>/dev/null || true)
+          stderr=$(cat "$stderr_file" 2>/dev/null || true)
+          rm -f "$stdout_file" "$stderr_file"
+
+          if [[ $status -ne 0 ]]; then
+            jq -nc \
+              --arg error "modprobe returned non-zero" \
+              --argjson exit_status "$status" \
+              --arg stdout "$stdout" \
+              --arg stderr "$stderr" \
+              '{
+                ok: false,
+                error: $error,
+                exit_status: $exit_status,
+                stdout: $stdout,
+                stderr: $stderr
+              }'
+            return
+          fi
+
+          jq -nc \
+            --argjson exit_status "$status" \
+            --arg stdout "$stdout" \
+            --arg stderr "$stderr" \
+            '{
+              ok: true,
+              exit_status: $exit_status,
+              stdout: $stdout,
+              stderr: $stderr
+            }'
+        }
+
+        probe_live_dmesg_bcache() {
+          if ! command -v dmesg >/dev/null 2>&1; then
+            json_fail "dmesg unavailable"
+            return
+          fi
+
+          if ! lines=$(
+            dmesg 2>/dev/null | grep -i 'bcache' || true
+          ); then
+            json_fail "dmesg unavailable"
+            return
+          fi
+
+          if [[ -z "$lines" ]]; then
+            json_fail "dmesg unavailable"
+            return
+          fi
+
+          jq -nc --arg lines "$lines" '
+            {
+              ok: true,
+              lines: ($lines | split("\n") | map(select(length > 0)))
+            }
+          '
+        }
+
+        probe_disks_lsblk() {
+          if ! payload=$(lsblk -J -O 2>/dev/null); then
+            json_fail "lsblk -J -O failed"
+            return
+          fi
+
+          if [[ -z "$payload" ]]; then
+            json_fail "lsblk -J -O failed"
+            return
+          fi
+
+          jq -nc --argjson payload "$payload" '{
+            ok: true,
+            devices: $payload
+          }'
+        }
+
+        probe_disks_by_partlabel() {
+          if [[ ! -d /dev/disk/by-partlabel ]]; then
+            json_fail "cannot read /dev/disk/by-partlabel"
+            return
+          fi
+
+          jq -nc --argjson entries "$by_partlabel_entries_json" '{
+            ok: true,
+            entries: $entries
+          }'
+        }
+
+        probe_disks_gpt() {
+          local devices_json=()
+          for device in /dev/mmcblk0 /dev/mmcblk1; do
+            if [[ ! -b "$device" ]]; then
+              devices_json+=("$(jq -nc --arg device "$device" --arg error "sgdisk -p failed" '{device:$device,ok:false,error:$error}')")
+              continue
+            fi
+
+            if ! sgdisk_output=$(sgdisk -p "$device" 2>&1); then
+              devices_json+=("$(jq -nc --arg device "$device" --arg error "sgdisk -p failed" --arg raw "$sgdisk_output" '{device:$device,ok:false,error:$error,raw:$raw}')")
+              continue
+            fi
+
+            disk_identifier=$(grep -m1 '^Disk identifier (GUID):' <<<"$sgdisk_output" | sed 's/^.*: //')
+            main_table_sectors=$(grep -m1 '^The main partition table begins at sector ' <<<"$sgdisk_output" | sed -E 's/^The main partition table begins at sector ([0-9]+) and ends at sector ([0-9]+).*/\1-\2/')
+            first_usable_sector=$(grep -m1 '^First usable sector is ' <<<"$sgdisk_output" | sed -E 's/^First usable sector is ([0-9]+), last usable sector is ([0-9]+).*/\1/')
+            last_usable_sector=$(grep -m1 '^First usable sector is ' <<<"$sgdisk_output" | sed -E 's/^First usable sector is ([0-9]+), last usable sector is ([0-9]+).*/\2/')
+            holds=$(grep -m1 '^Number of partition entries:' <<<"$sgdisk_output" | sed 's/^Number of partition entries: /')
+            partitions_free_space_json=$(
+              grep -E '^Total free space is ' <<<"$sgdisk_output" | jq -Rcs 'split("\n") | map(select(length > 0))'
+            )
+            partitions_json=$(
+              awk '
+                /^[[:space:]]*[0-9]+[[:space:]]/ {
+                  num=$1
+                  start=$2
+                  end=$3
+                  size=$4" "$5
+                  code=$6
+                  $1=$2=$3=$4=$5=$6=""
+                  sub(/^[[:space:]]+/, "", $0)
+                  name=$0
+                  gsub(/"/, "\\\"", name)
+                  printf "{\"number\":%s,\"start\":\"%s\",\"end\":\"%s\",\"size\":\"%s\",\"code\":\"%s\",\"name\":\"%s\"}\n", num, start, end, size, code, name
+                }
+              ' <<<"$sgdisk_output" | jq -cs '.'
+            )
+
+            header_json=$(jq -nc \
+              --arg disk_identifier "$disk_identifier" \
+              --arg holds "$holds" \
+              --arg main_table_sectors "$main_table_sectors" \
+              --arg first_usable_sector "$first_usable_sector" \
+              --arg last_usable_sector "$last_usable_sector" \
+              --argjson partitions_free_space "$partitions_free_space_json" '{
+                disk_identifier: $disk_identifier,
+                holds: $holds,
+                main_table_sectors: $main_table_sectors,
+                first_usable_sector: $first_usable_sector,
+                last_usable_sector: $last_usable_sector,
+                partitions_free_space: $partitions_free_space
+              }')
+
+            devices_json+=("$(jq -nc \
+              --arg device "$device" \
+              --arg raw "$sgdisk_output" \
+              --argjson header "$header_json" \
+              --argjson partitions "$partitions_json" '{
+                device: $device,
+                ok: true,
+                header: $header,
+                partitions: $partitions,
+                raw: $raw
+              }')")
+          done
+
+          printf '%s\n' "''${devices_json[@]}" | jq -cs '.'
+        }
+
+        probe_disks_blkid() {
+          local items_json=()
+
+          while IFS= read -r item; do
+            label=$(jq -r '.name' <<<"$item")
+            resolved_device=$(jq -r '.resolved_device' <<<"$item")
+            if [[ -z "$resolved_device" || "$resolved_device" == "null" ]]; then
+              items_json+=("$(jq -nc --arg device "$label" --arg error "blkid failed for $label" '{device:$device,ok:false,error:$error}')")
+              continue
+            fi
+
+            if ! blkid_output=$(blkid -o export -p "$resolved_device" 2>/dev/null); then
+              items_json+=("$(jq -nc --arg device "$resolved_device" --arg label "$label" --arg error "blkid failed for $resolved_device" '{device:$device,ok:false,label:$label,error:$error}')")
+              continue
+            fi
+
+            if [[ -z "$blkid_output" ]]; then
+              items_json+=("$(jq -nc --arg device "$resolved_device" --arg label "$label" --arg error "blkid failed for $resolved_device" '{device:$device,ok:false,label:$label,error:$error}')")
+              continue
+            fi
+
+            properties_json=$(jq -Rn --arg text "$blkid_output" '
+              [($text | split("\n")[] | select(length > 0))
+               | capture("^(?<key>[^=]+)=(?<value>.*)$")]
+              | map({key: .key, value: .value})
+              | from_entries
+            ')
+
+            items_json+=("$(jq -nc \
+              --arg device "$resolved_device" \
+              --arg label "$label" \
+              --argjson properties "$properties_json" '{
+                device: $device,
+                resolved_device: $device,
+                label: $label,
+                ok: true,
+                properties: $properties
+              }')")
+            done < <(jq -c '.[]' <<<"$by_partlabel_entries_json")
+
+          printf '%s\n' "''${items_json[@]}" | jq -cs '.'
+        }
+
+        probe_installed_modprobe_d() {
+          if [[ "$context_mode" != mounted ]]; then
+            jq -nc --arg path "/mnt/etc/modprobe.d" --arg error "installed system not mounted at /mnt" '[
+              {
+                path: $path,
+                ok: false,
+                error: $error
+              }
+            ]'
+            return
+          fi
+
+          if [[ ! -d /mnt/etc/modprobe.d ]]; then
+            jq -nc '[]'
+            return
+          fi
+
+          local items_json=()
+          while IFS= read -r file; do
+            [[ -n "$file" ]] || continue
+            contents=$(cat "$file" 2>/dev/null || true)
+            items_json+=("$(jq -nc --arg path "$file" --arg contents "$contents" '{path:$path,ok:true,contents:$contents}')")
+          done < <(find /mnt/etc/modprobe.d -type f | sort)
+
+          printf '%s\n' "''${items_json[@]}" | jq -cs '.'
+        }
+
+        probe_installed_bcache_super() {
+          local items_json=()
+          if ! command -v bcache-super-show >/dev/null 2>&1; then
+            while IFS= read -r item; do
+              label=$(jq -r '.name' <<<"$item")
+              resolved_device=$(jq -r '.resolved_device' <<<"$item")
+              items_json+=("$(jq -nc --arg device "$resolved_device" --arg resolved_device "$resolved_device" --arg role "unknown" --arg error "tool-missing" '{device:$device,resolved_device:$resolved_device,role:$role,ok:false,error:$error}')")
+            done < <(jq -c '.[]' <<<"$by_partlabel_entries_json")
+
+            printf '%s\n' "''${items_json[@]}" | jq -cs '.'
+            return
+          fi
+
+          while IFS= read -r item; do
+            label=$(jq -r '.name' <<<"$item")
+            resolved_device=$(jq -r '.resolved_device' <<<"$item")
+            role="unknown"
+            case "$label" in
+              *cache*) role="cache" ;;
+              *back*) role="backing" ;;
+            esac
+
+            if [[ -z "$resolved_device" || "$resolved_device" == "null" ]]; then
+              items_json+=("$(jq -nc --arg device "$label" --arg resolved_device "" --arg role "$role" --arg error "bcache-super-show failed for $label" '{device:$device,resolved_device:$resolved_device,role:$role,ok:false,error:$error}')")
+              continue
+            fi
+
+            if ! super_output=$(bcache-super-show "$resolved_device" 2>&1); then
+              items_json+=("$(jq -nc --arg device "$resolved_device" --arg resolved_device "$resolved_device" --arg role "$role" --arg error "bcache-super-show failed for $resolved_device" --arg raw "$super_output" '{device:$device,resolved_device:$resolved_device,role:$role,ok:false,error:$error,raw:$raw}')")
+              continue
+            fi
+
+            items_json+=("$(jq -nc --arg device "$resolved_device" --arg resolved_device "$resolved_device" --arg role "$role" --arg raw "$super_output" '{device:$device,resolved_device:$resolved_device,role:$role,ok:true,raw:$raw}')")
+          done < <(jq -c '.[]' <<<"$by_partlabel_entries_json")
+
+          printf '%s\n' "''${items_json[@]}" | jq -cs '.'
+        }
+
+        probe_installed_system_profile() {
+          if [[ "$context_mode" != mounted ]]; then
+            json_fail "installed system not mounted at /mnt"
+            return
+          fi
+
+          link=/mnt/nix/var/nix/profiles/system
+          if [[ ! -e "$link" ]]; then
+            json_fail "cannot resolve /mnt/nix/var/nix/profiles/system"
+            return
+          fi
+
+          if ! target=$(readlink -f "$link" 2>/dev/null); then
+            json_fail "cannot resolve /mnt/nix/var/nix/profiles/system"
+            return
+          fi
+
+          jq -nc --arg link "$link" --arg target "$target" '{
+            ok: true,
+            link: $link,
+            target: $target
+          }'
+        }
+
+        bootmedia_kernel_json=$(probe_bootmedia_kernel)
+        installed_kernel_json=$(probe_installed_kernel)
+        installed_bcache_module_path_json=$(probe_installed_bcache_module_path)
+        installed_bcache_module_modinfo_json=$(probe_installed_bcache_module_modinfo)
+        live_modprobe_bcache_json=$(probe_live_modprobe_bcache)
+        live_dmesg_bcache_json=$(probe_live_dmesg_bcache)
+        disks_lsblk_json=$(probe_disks_lsblk)
+        disks_by_partlabel_json=$(probe_disks_by_partlabel)
+        disks_gpt_json=$(probe_disks_gpt)
+        disks_blkid_json=$(probe_disks_blkid)
+        installed_modprobe_d_json=$(probe_installed_modprobe_d)
+        installed_bcache_super_json=$(probe_installed_bcache_super)
+        installed_system_profile_json=$(probe_installed_system_profile)
+
+        jq -nc \
+          --arg generated_at "$generated_at" \
+          --arg target_host "$target_host" \
+          --arg target_route "$target_route" \
+          --arg context_mode "$context_mode" \
+          --argjson bootmedia_kernel "$bootmedia_kernel_json" \
+          --argjson installed_kernel "$installed_kernel_json" \
+          --argjson installed_bcache_module_path "$installed_bcache_module_path_json" \
+          --argjson installed_bcache_module_modinfo "$installed_bcache_module_modinfo_json" \
+          --argjson live_modprobe_bcache "$live_modprobe_bcache_json" \
+          --argjson live_dmesg_bcache "$live_dmesg_bcache_json" \
+          --argjson disks_lsblk "$disks_lsblk_json" \
+          --argjson disks_by_partlabel "$disks_by_partlabel_json" \
+          --argjson disks_gpt "$disks_gpt_json" \
+          --argjson disks_blkid "$disks_blkid_json" \
+          --argjson installed_modprobe_d "$installed_modprobe_d_json" \
+          --argjson installed_bcache_super "$installed_bcache_super_json" \
+          --argjson installed_system_profile "$installed_system_profile_json" '{
+            schema_version: "1",
+            generated_at: $generated_at,
+            tool: {
+              name: "disk-diagnose",
+              version: "0.1.0"
+            },
+            target: {
+              host: $target_host,
+              route: $target_route
+            },
+            context: {
+              mode: $context_mode,
+              mounted_system_root: "/mnt"
+            },
+            bootmedia: {
+              kernel: $bootmedia_kernel
+            },
+            installed: {
+              kernel: $installed_kernel,
+              bcache_module: {
+                path: $installed_bcache_module_path,
+                modinfo: $installed_bcache_module_modinfo
+              },
+              modprobe_d: $installed_modprobe_d,
+              bcache_super: $installed_bcache_super,
+              system_profile: $installed_system_profile
+            },
+            live: {
+              modprobe: {
+                bcache: $live_modprobe_bcache
+              },
+              dmesg: {
+                bcache: $live_dmesg_bcache
+              }
+            },
+            disks: {
+              lsblk: $disks_lsblk,
+              by_partlabel: $disks_by_partlabel,
+              gpt: $disks_gpt,
+              blkid: $disks_blkid
+            }
+          }'
+EOF
+        ); then
+          remote_status=0
+        else
+          remote_status=$?
+        fi
+
+        probe_log=$(tail -c 4096 "$remote_stderr_file" 2>/dev/null || true)
+
+        if [[ $remote_status -ne 0 || -z "$remote_json" ]]; then
+          echo "disk-diagnose remote helper did not produce a report." >&2
+          build_failure_report "$probe_log" "remote helper failed before report generation"
+          exit 1
+        fi
+
+        if ! jq -e . >/dev/null 2>&1 <<<"$remote_json"; then
+          echo "disk-diagnose remote helper produced invalid JSON." >&2
+          build_failure_report "$probe_log" "remote helper produced invalid JSON"
+          exit 1
+        fi
+
+        jq -c --arg probe_log "$probe_log" '. + {probe_log: $probe_log}' <<<"$remote_json"
+      '';
+    };
+  });
+
   installTargetApps = genAttrs installMediaLib.supportedBuildSystems (buildSystem: {
     install = {
       type = "app";
@@ -1335,6 +2189,10 @@ EOF
       type = "app";
       program = "${probeWrapperPackages.${buildSystem}.probe-hardware}/bin/probe-hardware";
     };
+    disk-diagnose = {
+      type = "app";
+      program = "${diskDiagnoseWrapperPackages.${buildSystem}.disk-diagnose}/bin/disk-diagnose";
+    };
   });
 
   installTargetPackages = genAttrs installMediaLib.supportedBuildSystems (
@@ -1347,6 +2205,7 @@ EOF
       }
       {
         probe-hardware = probeWrapperPackages.${buildSystem}.probe-hardware;
+        disk-diagnose = diskDiagnoseWrapperPackages.${buildSystem}.disk-diagnose;
       }
   );
 in {

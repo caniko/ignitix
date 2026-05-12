@@ -10,6 +10,7 @@ The install target module exposes host-first wrappers:
 - `smount` for mounting an existing disko layout through installer media
 - `rescue` for mounting and reinstalling into an existing layout
 - `probe-hardware` for hardware report capture
+- `disk-diagnose` for read-only boot-media diagnostics
 
 Routes are semantic names such as `lan`, `usb`, or `vpn`. Each route resolves a
 target host from explicit route data, media endpoints, or downstream host

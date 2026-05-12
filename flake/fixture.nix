@@ -109,6 +109,20 @@ in {
       touch "$out"
     '';
 
+    checks.disk-diagnose-help = pkgs.runCommandLocal "disk-diagnose-help" {
+      nativeBuildInputs = [
+        pkgs.coreutils
+        pkgs.gnugrep
+        pkgs.nix
+      ];
+    } ''
+      export HOME=$(mktemp -d)
+      help_output=$(mktemp)
+      ${self'.packages.disk-diagnose}/bin/disk-diagnose --help >"$help_output"
+      grep -F 'Usage:' "$help_output" >/dev/null
+      touch "$out"
+    '';
+
     checks.split-disko-trust-layer = pkgs.runCommand "split-disko-trust-layer" {
       nativeBuildInputs = [
         pkgs.bash
