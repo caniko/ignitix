@@ -10,6 +10,7 @@ The install target module exposes host-first wrappers:
 - `smount` for mounting an existing disko layout through installer media
 - `rescue` for mounting and reinstalling into an existing layout
 - `probe-hardware` for hardware report capture
+- `disk-diagnose` for boot-media diagnostics
 - `unlock-luks` for a verified, local Iced passphrase prompt that unlocks an
   encrypted target through SSH without placing the passphrase in arguments,
   environment variables, or files

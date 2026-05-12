@@ -18,3 +18,6 @@
 - [RockPro64](./boards/rockpro64.md)
 - [RockPro64 Serial](./boards/rockpro64-serial.md)
 
+# Reference
+
+- [Disk Diagnose Schema](./reference/disk-diagnose-schema.json)
