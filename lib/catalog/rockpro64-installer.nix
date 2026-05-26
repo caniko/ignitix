@@ -10,16 +10,22 @@
   towBootSerialHandoff ? true,
   minimalHeadlessInitrd ? true,
   rootAuthorizedKeys,
-  usbGadget ? {
+  usbGadget ? {},
+}: let
+  usbGadgetDefaults = {
     endpointHost = "10.55.0.1";
     ipv4Address = "10.55.0.1/24";
     ipv4Gateway = "10.55.0.2";
-    ipv4Dns = "10.55.0.2";
+    ipv4Dns = "1.1.1.1";
     ipv4RouteMetric = "2048";
+
+    # 02 marks locally administered MACs; 63:61:6e is ASCII "can".
+    # These defaults are intended for one point-to-point USB-C OTG link.
     deviceMac = "02:63:61:6e:00:01";
     hostMac = "02:63:61:6e:00:02";
-  },
-}: let
+  };
+  resolvedUsbGadget = usbGadgetDefaults // usbGadget;
+
   commonKernelParams = [
     "keep_bootcon"
     "ignore_loglevel"
@@ -48,15 +54,12 @@ installMediaLib.mkInstallerMedia {
       "reboot"
     ];
     noDiskoDeps = true;
-    sshOptions = [
-      "StrictHostKeyChecking=no"
-      "UserKnownHostsFile=/dev/null"
-    ];
-    endpoints.usb.host = usbGadget.endpointHost;
+    endpoints.usb.host = resolvedUsbGadget.endpointHost;
   };
 
   modules =
     [
+      ../../nixos/modules/nixos-facter-overlay.nix
       ../../nixos/modules/rockpro64.nix
       ({config, lib, ...}:
         lib.mkMerge [
@@ -64,6 +67,7 @@ installMediaLib.mkInstallerMedia {
             ignitix.hardware.rockpro64.towBootSerialHandoff = towBootSerialHandoff;
 
             system.installer.channel.enable = false;
+            boot.zfs.forceImportRoot = false;
             programs.fuse.enable = lib.mkForce false;
             hardware.bluetooth.enable = lib.mkForce false;
             hardware.fancontrol.enable = lib.mkForce false;
@@ -117,7 +121,7 @@ installMediaLib.mkInstallerMedia {
         ])
       (installMediaLib.mkRockpro64UsbEthernetGadgetModule {
         name = "rockpro64-usb-c-gadget";
-        inherit (usbGadget)
+        inherit (resolvedUsbGadget)
           deviceMac
           hostMac
           ipv4Address

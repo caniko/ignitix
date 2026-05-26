@@ -1,0 +1,15 @@
+diff --git a/pkg/udev/udev.go b/pkg/udev/udev.go
+index d2354ac..4badc78 100644
+--- a/pkg/udev/udev.go
++++ b/pkg/udev/udev.go
+@@ -218,7 +218,9 @@ func NewUdev(env map[string]string) (*Udev, error) {
+ 
+ 	if bus, ok := env["ID_BUS"]; ok {
+ 		if err := result.Bus.UnmarshalText([]byte(bus)); err != nil {
+-			return nil, fmt.Errorf("failed to parse bus: %w", err)
++			if bus != "platform" {
++				return nil, fmt.Errorf("failed to parse bus: %w", err)
++			}
+ 		}
+ 	}
+ 

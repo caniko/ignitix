@@ -44,6 +44,17 @@ Ignitix includes a ROCKPro64 NixOS module and installer catalog entry. The
 installer is designed for headless bootstrap with serial console visibility,
 USB-C gadget networking, and `nixos-anywhere` wrappers.
 
+`lib.catalog.rockpro64Installer` ships USB-C gadget defaults for a single
+point-to-point `10.55.0.0/24` install link. The default synthetic MAC addresses
+use locally administered `02:63:61:6e:*` values and are safe for one installer
+per USB link; override `usbGadget` fields when a different link layout is
+needed.
+
+Install-target wrappers default their first-install SSH options to skip host-key
+files, because a new installer has no stable key yet. Set
+`ignitix.installTargets.<name>.nixosAnywhere.sshOptions` explicitly for
+host-key-pinned redeploy flows.
+
 Bootswain fully supports bidirectional ROCKPro64 serial workflows: it can read
 boot logs from board `TXD` and send U-Boot commands through board `RXD`.
 
@@ -66,4 +77,3 @@ Licensed under either of:
 - MIT license
 
 at your option.
-

@@ -15,6 +15,7 @@
     concatMapStringsSep
     escapeShellArg
     genAttrs
+    mkDefault
     mapAttrs
     mkIf
     mkMerge
@@ -75,7 +76,7 @@
     flakeUri = ".#${target.flakeAttr}";
     media = target.media;
     targetPort = nixosAnywhereCfg.targetPort;
-    sshOptions = nixosAnywhereCfg.sshOptions;
+    sshOptions = target.nixosAnywhere.sshOptions;
     inherit routes;
     hardwareReport = target.hardwareReport;
   }) cfg;
@@ -1448,7 +1449,29 @@ in {
               Optional hardware-report destination generated automatically during install.
             '';
           };
+
+          nixosAnywhere = mkOption {
+            type = types.submodule {
+              options.sshOptions = mkOption {
+                type = with types; listOf str;
+                default = [];
+                description = ''
+                  SSH options for first-install wrapper connections to this target.
+                '';
+              };
+            };
+            default = {};
+            description = ''
+              Per-target nixos-anywhere wrapper defaults.
+            '';
+          };
         };
+
+        config.nixosAnywhere.sshOptions = mkDefault [
+          "StrictHostKeyChecking=no"
+          "UserKnownHostsFile=/dev/null"
+          "GlobalKnownHostsFile=/dev/null"
+        ];
       }));
       default = {};
       description = ''

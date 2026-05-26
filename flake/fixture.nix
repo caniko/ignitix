@@ -80,6 +80,12 @@ in {
       route_host=$(jq -r .routes.usb.targetHost <<<"$resolved")
       test "$route_host" = "root@10.55.0.1"
 
+      jq -e '.sshOptions == [
+        "StrictHostKeyChecking=no",
+        "UserKnownHostsFile=/dev/null",
+        "GlobalKnownHostsFile=/dev/null"
+      ]' <<<"$resolved" >/dev/null
+
       test -n ${lib.escapeShellArg contract.toplevelDrvPath}
       test -n ${lib.escapeShellArg contract.diskoScriptNoDepsDrvPath}
       test ${lib.escapeShellArg contract.rootDiskDevice} = /dev/vda
