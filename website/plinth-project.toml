@@ -1,0 +1,42 @@
+[site]
+title = "Ignitix"
+description = "`ignitix` is a reusable Nix flake for building install media and install"
+base_url = "/"
+footer_note = "Generated from repository metadata by the plinth-project FOSS sweep."
+
+[[nav]]
+label = "Overview"
+href = "#overview"
+
+[[nav]]
+label = "Source"
+href = "ssh://git@codeberg.org/caniko/ignitix.git"
+
+[[footer_links]]
+label = "Source"
+href = "ssh://git@codeberg.org/caniko/ignitix.git"
+
+[[pages]]
+slug = "index"
+title = "Ignitix"
+description = "`ignitix` is a reusable Nix flake for building install media and install"
+
+[[pages.sections]]
+type = "hero"
+title = "Ignitix"
+tagline = "`ignitix` is a reusable Nix flake for building install media and install"
+subtitle = "`ignitix` is a reusable Nix flake for building install media and install"
+
+[[pages.sections.ctas]]
+label = "View source"
+href = "ssh://git@codeberg.org/caniko/ignitix.git"
+primary = true
+
+[[pages.sections]]
+type = "feature_grid"
+id = "overview"
+
+[[pages.sections.features]]
+title = "Nix"
+description = "Project technology detected from repository manifests."
+

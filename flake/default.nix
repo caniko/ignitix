@@ -21,6 +21,7 @@ in {
     flakeModules."install-media" = ./install-media.nix;
     flakeModules."install-targets" = ./install-targets.nix;
     lib = ignitixLib;
+    nixosModules.raspberryPi3BPlus = ../nixos/modules/raspberrypi3bplus.nix;
     nixosModules.rockpro64 = ../nixos/modules/rockpro64.nix;
   };
 }

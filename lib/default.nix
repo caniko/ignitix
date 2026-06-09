@@ -15,5 +15,13 @@ in
             lib
             ;
         };
+      raspberryPi3BPlusSdImage =
+        import ./catalog/raspberrypi3bplus-sd-image.nix {
+          inherit
+            inputs
+            installMediaLib
+            lib
+            ;
+        };
     };
   }

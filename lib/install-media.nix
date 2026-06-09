@@ -278,6 +278,8 @@ ${lib.optionalString (ipv4Gateway != null) ''
       modules =
         [
           ({pkgs, ...}: {
+            boot.zfs.forceImportRoot = false;
+
             environment.defaultPackages = [pkgs.nixos-facter] ++ extraPackages;
 
             users.users.root = {
@@ -335,10 +337,72 @@ ${lib.optionalString (ipv4Gateway != null) ''
           endpoints = nixosAnywhere.endpoints;
         };
     };
+
+  mkSdCardImage = {
+    extraPackages ? [],
+    modules ? [],
+    nixosAnywhere ? {},
+    rootAuthorizedKeys ? [],
+    imageModule ? inputs.nixpkgs + "/nixos/modules/installer/sd-card/sd-image-aarch64.nix",
+    ...
+  } @ args:
+    (removeAttrs args [
+      "extraPackages"
+      "imageModule"
+      "modules"
+      "nixosAnywhere"
+      "rootAuthorizedKeys"
+    ])
+    // {
+      inherit imageModule;
+      modules =
+        [
+          ({pkgs, ...}: {
+            boot.zfs.forceImportRoot = false;
+
+            environment.defaultPackages = [pkgs.nixos-facter] ++ extraPackages;
+
+            users.users.root = {
+              initialHashedPassword = mkForce "!";
+              openssh.authorizedKeys.keys = rootAuthorizedKeys;
+            };
+
+            services.openssh = {
+              enable = true;
+              openFirewall = true;
+              settings = {
+                PasswordAuthentication = mkForce false;
+                KbdInteractiveAuthentication = mkForce false;
+                PermitRootLogin = mkForce "prohibit-password";
+              };
+            };
+          })
+        ]
+        ++ modules;
+
+      nixosAnywhere =
+        {
+          enable = false;
+          targetUser = "root";
+          targetPort = 22;
+          phases = [];
+          noDiskoDeps = true;
+          sshOptions = [
+            "StrictHostKeyChecking=no"
+            "UserKnownHostsFile=/dev/null"
+          ];
+          endpoints = {};
+        }
+        // nixosAnywhere
+        // optionalAttrs (nixosAnywhere ? endpoints) {
+          endpoints = nixosAnywhere.endpoints;
+        };
+    };
 in {
   inherit
     mkInstallerMedia
     mkRockpro64UsbEthernetGadgetModule
+    mkSdCardImage
     mkUsbEthernetGadgetModule
     rockpro64UsbEthernetGadgetOverlayDtsText
     supportedBuildSystems
