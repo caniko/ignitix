@@ -43,12 +43,10 @@
     packages = {
       inherit
         docs
-        website
         ;
 
       site = pkgs.runCommand "ignitix-site" {} ''
         mkdir -p $out
-        cp -r ${website}/* $out/
         mkdir -p $out/docs
         cp -r ${docs}/* $out/docs/
       '';
@@ -57,7 +55,6 @@
     devShells.default = pkgs.mkShell {
       packages = [
         pkgs.mdbook
-        pkgs.zola
       ];
 
       shellHook = ''
