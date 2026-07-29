@@ -1,6 +1,6 @@
 [site]
 title = "Ignitix"
-description = "`ignitix` is a reusable Nix flake for building install media and install"
+description = "Ignitix is a reusable Nix flake for building NixOS install media and host-oriented install workflows."
 base_url = "/"
 footer_note = "Generated from repository metadata by the plinth-project FOSS sweep."
 
@@ -19,13 +19,13 @@ href = "ssh://git@codeberg.org/caniko/ignitix.git"
 [[pages]]
 slug = "index"
 title = "Ignitix"
-description = "`ignitix` is a reusable Nix flake for building install media and install"
+description = "Ignitix is a reusable Nix flake for building NixOS install media and host-oriented install workflows."
 
 [[pages.sections]]
 type = "hero"
 title = "Ignitix"
-tagline = "`ignitix` is a reusable Nix flake for building install media and install"
-subtitle = "`ignitix` is a reusable Nix flake for building install media and install"
+tagline = "Reusable NixOS installer media and workflows"
+subtitle = "Build board-specific images and host-first install targets with nixos-anywhere wrappers."
 
 [[pages.sections.ctas]]
 label = "View source"
@@ -39,4 +39,3 @@ id = "overview"
 [[pages.sections.features]]
 title = "Nix"
 description = "Project technology detected from repository manifests."
-
