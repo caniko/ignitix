@@ -46,7 +46,7 @@
                     networking.hostName = lib.mkForce value.hostname;
                     nixpkgs.hostPlatform = value.system;
 
-                    image.baseName = name;
+                    image.baseName = lib.mkForce name;
                   }
                 ]
                 ++ value.modules;
@@ -72,7 +72,7 @@
     (mapAttrsToList (
       name: value:
         genAttrs installMediaLib.supportedBuildSystems (_: {
-          ${value.packageName} = mediaConfigurations.${name}.config.system.build.sdImage;
+          ${value.packageName} = mediaConfigurations.${name}.config.system.build.image;
         })
     )
     cfg);

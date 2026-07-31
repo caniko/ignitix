@@ -23,3 +23,16 @@ ignitix.installMedia.rockpro64-installer =
 When `nixosAnywhere.enable` is true, Ignitix also exposes install wrapper
 packages and apps for that media.
 
+For a generic x86_64 rescue or installer ISO, use `mkInstallerMedia` with the
+NixOS minimal CD module:
+
+```nix
+ignitix.installMedia.rescue = inputs.ignitix.lib.mkInstallerMedia {
+  system = "x86_64-linux";
+  imageModule = inputs.nixpkgs + "/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix";
+  rootAuthorizedKeys = ["ssh-ed25519 AAAA..."];
+  nixosAnywhere.enable = false;
+};
+```
+
+The resulting package is an ISO exposed through `system.build.image`.

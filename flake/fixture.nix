@@ -4,6 +4,7 @@
   self,
   ...
 }: let
+  fixtureAuthorizedKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIA8LqsiluIJ6jpM2l46ELQ/V095NWnIVu5q2tw7F9C8L ignitix-fixture";
   ignitixLib = import ../lib {
     inherit
       inputs
@@ -44,6 +45,17 @@ in {
       rootAuthorizedKeys = [];
     };
 
+  ignitix.installMedia.example-x86_64-installer = ignitixLib.mkInstallerMedia {
+    hostname = "example-x86_64-installer";
+    packageName = "example-x86_64-installer";
+    rootAuthorizedKeys = [fixtureAuthorizedKey];
+    system = "x86_64-linux";
+    imageModule =
+      inputs.nixpkgs
+      + "/nixos/modules/installer/cd-dvd/installation-cd-minimal.nix";
+    nixosAnywhere.enable = false;
+  };
+
   ignitix.installTargets.example-cross-install = {
     flakeAttr = "example-crossbow";
     media = "example-rockpro64-installer";
@@ -59,6 +71,8 @@ in {
     ...
   }: let
     exampleCrossbow = self.nixosConfigurations.example-crossbow.config;
+    exampleRockpro64 = self.nixosConfigurations.example-rockpro64-installer.config;
+    exampleX86_64 = self.nixosConfigurations.example-x86_64-installer.config;
     contract = {
       toplevelDrvPath =
         builtins.unsafeDiscardStringContext
@@ -69,6 +83,20 @@ in {
       rootDiskDevice = exampleCrossbow.disko.devices.disk.root.device;
     };
   in {
+    checks.install-media-image-contract = pkgs.runCommand "install-media-image-contract" {} ''
+      test ${lib.escapeShellArg exampleX86_64.nixpkgs.hostPlatform.system} = x86_64-linux
+      test ${lib.escapeShellArg exampleX86_64.image.extension} = iso
+      test ${lib.escapeShellArg (builtins.unsafeDiscardStringContext exampleX86_64.system.build.image.drvPath)} = ${lib.escapeShellArg (builtins.unsafeDiscardStringContext exampleX86_64.system.build.isoImage.drvPath)}
+      test ${lib.escapeShellArg (builtins.unsafeDiscardStringContext exampleRockpro64.system.build.image.drvPath)} = ${lib.escapeShellArg (builtins.unsafeDiscardStringContext exampleRockpro64.system.build.sdImage.drvPath)}
+      test ${lib.escapeShellArg (lib.boolToString exampleX86_64.services.openssh.enable)} = true
+      test ${lib.escapeShellArg (lib.boolToString exampleX86_64.services.openssh.openFirewall)} = true
+      test ${lib.escapeShellArg exampleX86_64.services.openssh.settings.PermitRootLogin} = prohibit-password
+      test ${lib.escapeShellArg (lib.boolToString exampleX86_64.services.openssh.settings.PasswordAuthentication)} = false
+      test ${lib.escapeShellArg (lib.boolToString exampleX86_64.services.openssh.settings.KbdInteractiveAuthentication)} = false
+      grep -F -- ${lib.escapeShellArg fixtureAuthorizedKey} <<< ${lib.escapeShellArg (builtins.toJSON exampleX86_64.users.users.root.openssh.authorizedKeys.keys)}
+      touch "$out"
+    '';
+
     checks.install-target-cross-flake-attr = pkgs.runCommand "install-target-cross-flake-attr" {
       nativeBuildInputs = [pkgs.jq];
     } ''
