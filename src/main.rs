@@ -335,6 +335,11 @@ fn enrollment_preflight(device: &Path) -> Result<()> {
     if !policy.is_file() || policy.len() == 0 {
         bail!("pcrlock policy must be a non-empty regular file: {PCRLOCK_POLICY}");
     }
+    let policy = fs::read(PCRLOCK_POLICY)
+        .with_context(|| format!("reading required pcrlock policy: {PCRLOCK_POLICY}"))?;
+    let policy: serde_json::Value =
+        serde_json::from_slice(&policy).context("parsing pcrlock policy")?;
+    validate_pcrlock_policy(&policy)?;
 
     let metadata = fs::metadata(device)
         .with_context(|| format!("expected LUKS2 device is missing: {}", device.display()))?;
@@ -362,6 +367,26 @@ fn enrollment_preflight(device: &Path) -> Result<()> {
     let metadata: serde_json::Value =
         serde_json::from_slice(&output.stdout).context("parsing LUKS2 JSON metadata")?;
     validate_luks_metadata(&metadata)
+}
+
+fn validate_pcrlock_policy(policy: &serde_json::Value) -> Result<()> {
+    let pcr_values = policy
+        .get("pcrValues")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| anyhow!("pcrlock policy has no pcrValues array"))?;
+    for required in [4, 7] {
+        let present = pcr_values.iter().any(|entry| {
+            entry.get("pcr").and_then(serde_json::Value::as_u64) == Some(required)
+                && entry
+                    .get("values")
+                    .and_then(serde_json::Value::as_array)
+                    .is_some_and(|values| !values.is_empty())
+        });
+        if !present {
+            bail!("pcrlock policy does not protect required PCR {required}");
+        }
+    }
+    Ok(())
 }
 
 fn secure_boot_preflight(efivars: &Path) -> Result<()> {
@@ -1376,6 +1401,30 @@ mod tests {
         )
         .unwrap();
         assert!(secure_boot_preflight(wrong_guid.path()).is_err());
+    }
+
+    #[test]
+    fn pcrlock_policy_requires_populated_pcr_4_and_7() {
+        let valid = serde_json::json!({
+            "pcrValues": [
+                {"pcr": 4, "values": ["boot-loader"]},
+                {"pcr": 7, "values": ["secure-boot"]}
+            ]
+        });
+        assert!(validate_pcrlock_policy(&valid).is_ok());
+
+        let missing_boot_loader = serde_json::json!({
+            "pcrValues": [{"pcr": 7, "values": ["secure-boot"]}]
+        });
+        assert!(validate_pcrlock_policy(&missing_boot_loader).is_err());
+
+        let empty_secure_boot = serde_json::json!({
+            "pcrValues": [
+                {"pcr": 4, "values": ["boot-loader"]},
+                {"pcr": 7, "values": []}
+            ]
+        });
+        assert!(validate_pcrlock_policy(&empty_secure_boot).is_err());
     }
 
     #[test]
