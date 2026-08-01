@@ -7,6 +7,10 @@
       inputs.nixpkgs-lib.follows = "nixpkgs";
     };
 
+    crane = {
+      url = "github:ipetkov/crane";
+    };
+
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     nixos-anywhere.url = "github:nix-community/nixos-anywhere";
 

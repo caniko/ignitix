@@ -140,6 +140,16 @@ in {
       grep -F 'nix-store --repair-path %q' "$wrapper" >/dev/null
       grep -F -- '--from "$remote_store_uri"' "$wrapper" >/dev/null
 
+      unlock_wrapper=${self'.packages.unlock-luks}/bin/unlock-luks
+      grep -F 'ignitix-unlock-luks' "$unlock_wrapper" >/dev/null
+      grep -F 'target_host' "$unlock_wrapper" >/dev/null
+      grep -F -- '--host-key-sha256' "$unlock_wrapper" >/dev/null
+
+      enroll_wrapper=${self'.packages.enroll-tpm2-pin}/bin/enroll-tpm2-pin
+      grep -F 'enroll-tpm2-pin' "$enroll_wrapper" >/dev/null
+      grep -F 'target_host' "$enroll_wrapper" >/dev/null
+      grep -F -- '--remote-helper' "$enroll_wrapper" >/dev/null
+
       touch "$out"
     '';
 

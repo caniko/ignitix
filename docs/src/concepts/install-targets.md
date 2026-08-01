@@ -10,6 +10,11 @@ The install target module exposes host-first wrappers:
 - `smount` for mounting an existing disko layout through installer media
 - `rescue` for mounting and reinstalling into an existing layout
 - `probe-hardware` for hardware report capture
+- `unlock-luks` for a verified, local Iced passphrase prompt that unlocks an
+  encrypted target through SSH without placing the passphrase in arguments,
+  environment variables, or files
+- `enroll-tpm2-pin` for guarded TPM2+pcrlock enrollment using masked local
+  passphrase and PIN fields
 
 Routes are semantic names such as `lan`, `usb`, or `vpn`. Each route resolves a
 target host from explicit route data, media endpoints, or downstream host
@@ -34,3 +39,32 @@ setting:
 ```nix
 ignitix.installTargets.thething.flakeAttr = "thething-crossbow";
 ```
+
+Unlocking requires the target route, the expected ED25519 fingerprint shown on
+the installer console, and the LUKS UUID:
+
+```console
+nix run .#unlock-luks -- usb thething -- \
+  --host-key-sha256 SHA256:... \
+  --device-uuid 00000000-0000-0000-0000-000000000000 \
+  --mapper cryptroot
+```
+
+The expected fingerprint is intentionally supplied for each invocation because
+installer media normally generates an ephemeral SSH host key at boot. Ignitix
+compares it before showing the passphrase prompt and pins the matching key for
+the SSH connection.
+
+TPM2+PIN enrollment uses the same route and host-key pinning:
+
+```console
+nix run .#enroll-tpm2-pin -- usb thething -- \
+  --host-key-sha256 SHA256:... \
+  --device-uuid 00000000-0000-0000-0000-000000000000
+```
+
+Install `packages.ignitix-unlock-luks` on the target so the default helper path
+`/run/current-system/sw/bin/ignitix-unlock-luks` exists. The helper refuses to
+prompt unless Secure Boot is enabled in user mode, the pcrlock policy exists,
+the UUID names a LUKS2 block device with a password slot, and no TPM token is
+already enrolled.

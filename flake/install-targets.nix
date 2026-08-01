@@ -93,6 +93,76 @@
   installTargetsJson = toJSON resolvedTargets;
   splitDiskoTrustLayerShell = builtins.readFile ./split-disko-trust-layer.sh;
 
+  luksOperatorWrapperPackages = genAttrs installMediaLib.supportedBuildSystems (buildSystem: let
+    pkgs = inputs.nixpkgs.legacyPackages.${buildSystem};
+    popup = config.flake.packages.${buildSystem}.ignitix-unlock-luks;
+    availableTargets = renderAvailableTargets cfg;
+    mkWrapper = {
+      name,
+      operation,
+      usage,
+    }:
+      pkgs.writeShellApplication {
+        inherit name;
+        runtimeInputs = [pkgs.jq popup];
+        text = ''
+          set -euo pipefail
+
+          resolved_targets_json=${escapeShellArg installTargetsJson}
+
+          usage() {
+            printf '%s\n' \
+              ${escapeShellArg usage} \
+              "" \
+              'Available targets:' \
+              '${availableTargets}'
+          }
+
+          if [[ ''${1:-} == "--help" || ''${1:-} == "-h" ]]; then
+            usage
+            exit 0
+          fi
+          if [[ $# -lt 2 ]]; then
+            usage >&2
+            exit 1
+          fi
+
+          route_input=$1
+          host_input=$2
+          shift 2
+          if [[ ''${1:-} == "--" ]]; then
+            shift
+          fi
+
+          target_json=$(jq -cer --arg host "$host_input" '.[$host]' <<<"$resolved_targets_json") || {
+            echo "Unknown install target: $host_input" >&2
+            usage >&2
+            exit 1
+          }
+          target_host=$(jq -r --arg route "$route_input" '.routes[$route].targetHost // empty' <<<"$target_json")
+          if [[ -z "$target_host" ]]; then
+            echo "Unknown route '$route_input' for target '$host_input'" >&2
+            usage >&2
+            exit 1
+          fi
+          target_port=$(jq -r '.targetPort' <<<"$target_json")
+
+          exec ${pkgs.lib.getExe popup} ${operation} "$target_host" --port "$target_port" "$@"
+        '';
+      };
+  in {
+    unlock-luks = mkWrapper {
+      name = "unlock-luks";
+      operation = "";
+      usage = "Usage: unlock-luks <route> <host> [--] --host-key-sha256 SHA256:... --device-uuid UUID [--mapper NAME]";
+    };
+    enroll-tpm2-pin = mkWrapper {
+      name = "enroll-tpm2-pin";
+      operation = "enroll-tpm2-pin";
+      usage = "Usage: enroll-tpm2-pin <route> <host> [--] --host-key-sha256 SHA256:... --device-uuid UUID [--remote-helper PATH]";
+    };
+  });
+
   targetWrapperPackages = genAttrs installMediaLib.supportedBuildSystems (buildSystem: let
     pkgs = inputs.nixpkgs.legacyPackages.${buildSystem};
     availableTargets = renderAvailableTargets cfg;
@@ -1336,6 +1406,14 @@ EOF
       type = "app";
       program = "${probeWrapperPackages.${buildSystem}.probe-hardware}/bin/probe-hardware";
     };
+    unlock-luks = {
+      type = "app";
+      program = "${luksOperatorWrapperPackages.${buildSystem}.unlock-luks}/bin/unlock-luks";
+    };
+    enroll-tpm2-pin = {
+      type = "app";
+      program = "${luksOperatorWrapperPackages.${buildSystem}.enroll-tpm2-pin}/bin/enroll-tpm2-pin";
+    };
   });
 
   installTargetPackages = genAttrs installMediaLib.supportedBuildSystems (
@@ -1345,12 +1423,16 @@ EOF
         install = targetWrapperPackages.${buildSystem}.install;
         rescue = rescueWrapperPackages.${buildSystem}.rescue;
         smount = smountWrapperPackages.${buildSystem}.smount;
+        unlock-luks = luksOperatorWrapperPackages.${buildSystem}.unlock-luks;
+        enroll-tpm2-pin = luksOperatorWrapperPackages.${buildSystem}.enroll-tpm2-pin;
       }
       {
         probe-hardware = probeWrapperPackages.${buildSystem}.probe-hardware;
       }
   );
 in {
+  imports = [./unlock-luks.nix];
+
   options.ignitix = {
     hostMetadata = mkOption {
       type = types.attrsOf types.anything;
