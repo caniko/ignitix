@@ -1,10 +1,10 @@
 [ci]
 provider = "actions"
-platform = "forgejo"
+platform = "github"
 runtime = "nix"
-runner = "codefloe-global"
+runner = "ubuntu-24.04"
+all_features = false
 
 [ci.pages]
 repo = "caniko/ignitix"
 canonical_domain = "ignitix.tartanoglu.com"
-source_branch = "main"
