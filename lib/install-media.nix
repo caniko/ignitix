@@ -154,7 +154,7 @@
         if [ -z "$udc_names" ]; then
           echo "No USB device controller found for gadget mode" >&2
           echo "Available USB role-switch devices:" >&2
-          ${pkgs.coreutils}/bin/find /sys/class/usb_role -maxdepth 2 -type f -print -exec ${pkgs.coreutils}/bin/cat {} \; 2>/dev/null >&2 || true
+          ${pkgs.findutils}/bin/find /sys/class/usb_role -maxdepth 2 -type f -print -exec ${pkgs.coreutils}/bin/cat {} \; 2>/dev/null >&2 || true
           echo "Recent USB gadget kernel messages:" >&2
           ${pkgs.systemd}/bin/journalctl -k -b --no-pager 2>/dev/null \
             | ${pkgs.gnugrep}/bin/grep -Ei 'dwc3|udc|g_ether|usb-role|role-switch|typec|fusb|tcpm|configfs|libcomposite' >&2 || true
