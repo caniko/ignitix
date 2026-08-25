@@ -11,5 +11,5 @@ build-dir = "book"
 site-url = "/ignitix/docs/"
 default-theme = "coal"
 preferred-dark-theme = "coal"
-git-repository-url = "https://codeberg.org/caniko/ignitix"
+git-repository-url = "https://github.com/caniko/ignitix"
 

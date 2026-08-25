@@ -25,7 +25,7 @@ Add `ignitix` to a flake and import the install-media module:
 
 ```nix
 {
-  inputs.ignitix.url = "git+https://codeberg.org/caniko/ignitix.git";
+  inputs.ignitix.url = "git+https://github.com/caniko/ignitix.git";
 
   outputs = {
     ignitix,
