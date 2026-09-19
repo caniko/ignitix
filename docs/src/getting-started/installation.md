@@ -4,7 +4,7 @@ Add Ignitix as a flake input:
 
 ```nix
 {
-  inputs.ignitix.url = "git+https://codeberg.org/caniko/ignitix.git";
+  inputs.ignitix.url = "git+https://github.com/caniko/ignitix.git";
 }
 ```
 

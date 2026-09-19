@@ -17,5 +17,5 @@ Ignitix currently provides:
 - USB-C gadget networking helpers for headless board bootstrap
 - install, mount, rescue, and hardware-probe wrapper outputs
 
-Source: <https://codeberg.org/caniko/ignitix>
+Source: <https://github.com/caniko/ignitix>
 

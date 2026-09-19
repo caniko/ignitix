@@ -1,5 +1,11 @@
 # Ignitix
 
+<!-- simit:badges:start -->
+
+[![CI](https://img.shields.io/badge/CI-managed-2088ff)](.github/workflows/ci.yaml) [![docs](https://img.shields.io/badge/docs-enabled-6f42c1)](docs)
+
+<!-- simit:badges:end -->
+
 `ignitix` is a reusable Nix flake for building install media and install
 workflows around NixOS. It packages board-specific installer images,
 `nixos-anywhere` wrappers, and host-oriented install targets so downstream
@@ -19,7 +25,7 @@ Add `ignitix` to a flake and import the install-media module:
 
 ```nix
 {
-  inputs.ignitix.url = "git+https://codeberg.org/caniko/ignitix.git";
+  inputs.ignitix.url = "git+https://github.com/caniko/ignitix.git";
 
   outputs = {
     ignitix,
