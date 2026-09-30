@@ -57,9 +57,25 @@ per USB link; override `usbGadget` fields when a different link layout is
 needed.
 
 Install-target wrappers default their first-install SSH options to skip host-key
-files, because a new installer has no stable key yet. Set
-`ignitix.installTargets.<name>.nixosAnywhere.sshOptions` explicitly for
-host-key-pinned redeploy flows.
+files. For cloud/public bootstrap, set
+`ignitix.installTargets.<name>.nixosAnywhere.bootstrapHostKey` to the installer's
+ED25519 public key verified through the provider console or another independently
+authenticated channel. The resolved target supplies an immutable `known_hosts`
+file, strict key checking, key-only authentication and fresh SSH connections for
+install, probe, mount and downstream key-reading clients. One identity covers all
+declared bootstrap routes and ports. The installed runtime key is enrolled
+separately after reading it over that verified bootstrap connection.
+
+`nixosAnywhere.sshOptions` remains available for additional options; bootstrap
+trust takes precedence. Media-specific install wrappers honor explicit caller
+trust ahead of their first-install defaults. Ignitix carries a source patch for
+the pinned `nixos-anywhere`: its original default SSH options preceded caller
+options, so OpenSSH ignored an explicit `StrictHostKeyChecking=yes`. The
+`nixos-anywhere-ssh-options` check runs the real argument parser and verifies
+OpenSSH's effective configuration; `install-target-bootstrap-trust` checks the
+resolved target and public-key file. Null bootstrap identity retains the legacy
+first-install behavior. These checks do not prove an actual install, kexec
+identity continuity or runtime-key enrollment; those require an integration VM.
 
 Bootswain fully supports bidirectional ROCKPro64 serial workflows: it can read
 boot logs from board `TXD` and send U-Boot commands through board `RXD`.

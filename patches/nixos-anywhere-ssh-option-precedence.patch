@@ -1,0 +1,22 @@
+diff --git a/src/nixos-anywhere.sh b/src/nixos-anywhere.sh
+--- a/src/nixos-anywhere.sh
++++ b/src/nixos-anywhere.sh
+@@ -67,7 +67,7 @@ declare -A diskEncryptionKeys=()
+ declare -A diskEncryptionKeys=()
+ declare -A extraFilesOwnership=()
+ declare -a nixCopyOptions=()
+-declare -a sshArgs=("-o" "IdentitiesOnly=yes" "-i" "$tempDir/nixos-anywhere" "-o" "UserKnownHostsFile=/dev/null" "-o" "StrictHostKeyChecking=no")
++declare -a sshArgs=("-o" "IdentitiesOnly=yes" "-i" "$tempDir/nixos-anywhere")
+-
++
+ breakpoint() {
+   (
+@@ -467,3 +467,7 @@ parseArgs() {
++  # OpenSSH uses the first value of each option. Caller-supplied trust must
++  # precede the first-install defaults, including for ssh-copy-id and Nix copy.
++  sshArgs+=("-o" "UserKnownHostsFile=/dev/null" "-o" "StrictHostKeyChecking=no")
++
+ }
+-
++
+ # ssh wrapper

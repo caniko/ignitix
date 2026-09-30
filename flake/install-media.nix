@@ -27,7 +27,8 @@
     inherit inputs;
   };
 
-  mediaConfigurations = mapAttrs
+  mediaConfigurations =
+    mapAttrs
     (
       name: value:
         withSystem value.system (
@@ -58,7 +59,7 @@
                   self
                   self'
                   ;
-                hostname = value.hostname;
+                inherit (value) hostname;
               };
             }
         )
@@ -70,16 +71,16 @@
     recursiveUpdate
     {}
     (mapAttrsToList (
-      name: value:
-        genAttrs installMediaLib.supportedBuildSystems (_: {
-          ${value.packageName} = mediaConfigurations.${name}.config.system.build.image;
-        })
-    )
-    cfg);
+        name: value:
+          genAttrs installMediaLib.supportedBuildSystems (_: {
+            ${value.packageName} = mediaConfigurations.${name}.config.system.build.image;
+          })
+      )
+      cfg);
 
   nixosAnywherePackages = genAttrs installMediaLib.supportedBuildSystems (
     buildSystem: {
-      nixos-anywhere = inputs.nixos-anywhere.packages.${buildSystem}.default;
+      nixos-anywhere = installMediaLib.patchNixosAnywhere inputs.nixos-anywhere.packages.${buildSystem}.default;
     }
   );
 
@@ -88,72 +89,77 @@
     recursiveUpdate
     {}
     (mapAttrsToList (
-      name: value:
-        if !value.nixosAnywhere.enable
-        then {}
-        else
-          genAttrs installMediaLib.supportedBuildSystems (
-            buildSystem: let
-              pkgs = inputs.nixpkgs.legacyPackages.${buildSystem};
-              nixosAnywherePkg =
-                if inputs ? nixos-anywhere
-                then inputs.nixos-anywhere.packages.${buildSystem}.default
-                else inputs.ignitix.packages.${buildSystem}.nixos-anywhere;
-              nixosAnywhereCfg = value.nixosAnywhere;
-              phasesCsv = lib.concatStringsSep "," nixosAnywhereCfg.phases;
-              sshOptionLines = concatMapStringsSep "\n" (
-                option: ''
-                  ssh_option=${escapeShellArg option}
-                  args+=(--ssh-option)
-                  args+=("$ssh_option")
-                ''
-              ) nixosAnywhereCfg.sshOptions;
-            in {
-              ${"install-${name}"} = pkgs.writeShellApplication {
-                name = "install-${name}";
-                runtimeInputs = [nixosAnywherePkg];
-                text = ''
-                  set -euo pipefail
+        name: value:
+          if !value.nixosAnywhere.enable
+          then {}
+          else
+            genAttrs installMediaLib.supportedBuildSystems (
+              buildSystem: let
+                pkgs = inputs.nixpkgs.legacyPackages.${buildSystem};
+                nixosAnywherePkg =
+                  if inputs ? nixos-anywhere
+                  then installMediaLib.patchNixosAnywhere inputs.nixos-anywhere.packages.${buildSystem}.default
+                  else inputs.ignitix.packages.${buildSystem}.nixos-anywhere;
+                nixosAnywhereCfg = value.nixosAnywhere;
+                phasesCsv = lib.concatStringsSep "," nixosAnywhereCfg.phases;
+                sshOptionLines =
+                  concatMapStringsSep "\n" (
+                    option: ''
+                      ssh_option=${escapeShellArg option}
+                      ssh_args+=(--ssh-option)
+                      ssh_args+=("$ssh_option")
+                    ''
+                  )
+                  nixosAnywhereCfg.sshOptions;
+              in {
+                ${"install-${name}"} = pkgs.writeShellApplication {
+                  name = "install-${name}";
+                  runtimeInputs = [nixosAnywherePkg];
+                  text = ''
+                    set -euo pipefail
 
-                  target_port=${escapeShellArg (toString nixosAnywhereCfg.targetPort)}
-                  phases_csv=${escapeShellArg phasesCsv}
+                    target_port=${escapeShellArg (toString nixosAnywhereCfg.targetPort)}
+                    phases_csv=${escapeShellArg phasesCsv}
 
-                  args=()
-                  args+=(--ssh-port)
-                  args+=("$target_port")
-                  args+=(--phases)
-                  args+=("$phases_csv")
+                    args=()
+                    args+=(--ssh-port)
+                    args+=("$target_port")
+                    args+=(--phases)
+                    args+=("$phases_csv")
 
-                  ${lib.optionalString nixosAnywhereCfg.noDiskoDeps ''
-                    args+=(--no-disko-deps)
-                  ''}
-                  ${sshOptionLines}
+                    ${lib.optionalString nixosAnywhereCfg.noDiskoDeps ''
+                      args+=(--no-disko-deps)
+                    ''}
+                    ssh_args=()
+                    ${sshOptionLines}
 
-                  exec nixos-anywhere "''${args[@]}" "$@"
-                '';
-              };
-            }
-          )
-    )
-    cfg);
+                    # Explicit caller trust precedes the media's first-install
+                    # defaults. Other media defaults remain caller-overridable.
+                    exec nixos-anywhere "''${args[@]}" "$@" "''${ssh_args[@]}"
+                  '';
+                };
+              }
+            )
+      )
+      cfg);
 
   mediaInstallApps =
     foldl'
     recursiveUpdate
     {}
     (mapAttrsToList (
-      name: value:
-        if !value.nixosAnywhere.enable
-        then {}
-        else
-          genAttrs installMediaLib.supportedBuildSystems (buildSystem: {
-            ${"install-${name}"} = {
-              type = "app";
-              program = "${mediaInstallPackages.${buildSystem}.${"install-${name}"}}/bin/install-${name}";
-            };
-          })
-    )
-    cfg);
+        name: value:
+          if !value.nixosAnywhere.enable
+          then {}
+          else
+            genAttrs installMediaLib.supportedBuildSystems (buildSystem: {
+              ${"install-${name}"} = {
+                type = "app";
+                program = "${mediaInstallPackages.${buildSystem}.${"install-${name}"}}/bin/install-${name}";
+              };
+            })
+      )
+      cfg);
 in {
   options.ignitix.installMedia = mkOption {
     type = types.attrsOf (types.submodule ({name, ...}: {
