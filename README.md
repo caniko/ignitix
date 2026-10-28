@@ -17,7 +17,7 @@ The current focus is pragmatic:
 - ROCKPro64 installer media with serial console and USB-C gadget networking
 - host-first install target wrappers for install, mount, rescue, and hardware
   probing workflows
-- library helpers for downstream flakes such as canix
+- library helpers for downstream flakes
 
 ## Quick Start
 
@@ -89,7 +89,7 @@ nix build .#site
 ```
 
 The project website builds with Zola and the documentation builds with mdBook.
-The combined Codeberg Pages output is exposed as `.#site`.
+The combined static-site output is exposed as `.#site`.
 
 ## License
 

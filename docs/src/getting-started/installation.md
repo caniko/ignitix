@@ -23,6 +23,6 @@ Import the flake-parts modules you need:
 ```
 
 Downstream flakes usually also pass host metadata into Ignitix install target
-definitions. In canix, `lib/hosts.nix` is the source of truth for LAN, VPN,
+definitions. The downstream host metadata is the source of truth for LAN, VPN,
 and hardware-specific fields.
 

@@ -5,7 +5,7 @@ install workflows. It gives downstream flakes a place to define bootable
 installer images, `nixos-anywhere` wrappers, and route-aware host install
 commands without copying shell glue between repositories.
 
-The first-class use case is canix-style infrastructure: host metadata lives in
+The first-class use case is fleet-style infrastructure: host metadata lives in
 the downstream flake, while Ignitix supplies the reusable modules and wrapper
 machinery.
 

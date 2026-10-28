@@ -12,7 +12,7 @@
       ;
   };
 in {
-  flake.nixosConfigurations.example-crossbow = inputs.nixpkgs.lib.nixosSystem {
+  flake.nixosConfigurations.example-cross = inputs.nixpkgs.lib.nixosSystem {
     system = "x86_64-linux";
     modules = [
       inputs.nixos-anywhere.inputs.disko.nixosModules.disko
@@ -61,7 +61,7 @@ in {
   };
 
   ignitix.installTargets.example-cross-install = {
-    flakeAttr = "example-crossbow";
+    flakeAttr = "example-cross";
     media = "example-rockpro64-installer";
     routes.usb.resolver = {
       type = "mediaEndpoint";
@@ -71,7 +71,7 @@ in {
 
   # Public fixture identity only; never an enrolled host or provider output.
   ignitix.installTargets.example-pinned-install = {
-    flakeAttr = "example-crossbow";
+    flakeAttr = "example-cross";
     media = "example-rockpro64-installer";
     nixosAnywhere.bootstrapHostKey = fixtureAuthorizedKey;
     routes.usb.resolver = {
@@ -85,18 +85,18 @@ in {
     self',
     ...
   }: let
-    exampleCrossbow = self.nixosConfigurations.example-crossbow.config;
+    exampleCross = self.nixosConfigurations.example-cross.config;
     exampleRockpro64 = self.nixosConfigurations.example-rockpro64-installer.config;
     exampleX86_64 = self.nixosConfigurations.example-x86_64-installer.config;
     examplePi = self.nixosConfigurations.example-raspberrypi3bplus.config;
     contract = {
       toplevelDrvPath =
         builtins.unsafeDiscardStringContext
-        exampleCrossbow.system.build.toplevel.drvPath;
+        exampleCross.system.build.toplevel.drvPath;
       diskoScriptNoDepsDrvPath =
         builtins.unsafeDiscardStringContext
-        exampleCrossbow.system.build.diskoScriptNoDeps.drvPath;
-      rootDiskDevice = exampleCrossbow.disko.devices.disk.root.device;
+        exampleCross.system.build.diskoScriptNoDeps.drvPath;
+      rootDiskDevice = exampleCross.disko.devices.disk.root.device;
     };
   in {
     checks.install-media-image-contract = pkgs.runCommand "install-media-image-contract" {} ''
@@ -128,7 +128,7 @@ in {
         resolved=${lib.escapeShellArg (builtins.toJSON self.installTargetsResolved.example-cross-install)}
 
         flake_uri=$(jq -r .flakeUri <<<"$resolved")
-        test "$flake_uri" = ".#example-crossbow"
+        test "$flake_uri" = ".#example-cross"
 
         route_host=$(jq -r .routes.usb.targetHost <<<"$resolved")
         test "$route_host" = "root@10.55.0.1"
@@ -144,7 +144,7 @@ in {
         test ${lib.escapeShellArg contract.rootDiskDevice} = /dev/vda
 
         wrapper=${self'.packages.install}/bin/install
-        grep -F '.#example-crossbow' "$wrapper" >/dev/null
+        grep -F '.#example-cross' "$wrapper" >/dev/null
         grep -F 'final_args+=(--flake "''${flake_override:-$default_flake}")' "$wrapper" >/dev/null
         grep -F 'auto|local|remote|split)' "$wrapper" >/dev/null
         grep -F 'final_args+=(--store-paths "$split_disko_script_path" "$split_system_path")' "$wrapper" >/dev/null

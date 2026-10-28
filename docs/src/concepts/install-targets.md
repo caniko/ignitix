@@ -62,18 +62,18 @@ At minimum it needs:
   depending on the selected install-media wrapper options
 - `config.disko.devices.disk` for Ignitix's disk preflight
 
-For example, a target named `thething` can install `.#thething-crossbow` by
+For example, a target named `example-host` can install `.#example-host-cross` by
 setting:
 
 ```nix
-ignitix.installTargets.thething.flakeAttr = "thething-crossbow";
+ignitix.installTargets.example-host.flakeAttr = "example-host-cross";
 ```
 
 Unlocking requires the target route, the expected ED25519 fingerprint shown on
 the installer console, and the LUKS UUID:
 
 ```console
-nix run .#unlock-luks -- usb thething -- \
+nix run .#unlock-luks -- usb example-host -- \
   --host-key-sha256 SHA256:... \
   --device-uuid 00000000-0000-0000-0000-000000000000 \
   --mapper cryptroot
@@ -87,7 +87,7 @@ the SSH connection.
 TPM2+PIN enrollment uses the same route and host-key pinning:
 
 ```console
-nix run .#enroll-tpm2-pin -- usb thething -- \
+nix run .#enroll-tpm2-pin -- usb example-host -- \
   --host-key-sha256 SHA256:... \
   --device-uuid 00000000-0000-0000-0000-000000000000
 ```
