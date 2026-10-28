@@ -4,6 +4,7 @@ platform = "github"
 runtime = "nix"
 runner = "ubuntu-24.04"
 all_features = false
+qualified_by = "caniko/fleet"
 
 [ci.pages]
 repo = "caniko/ignitix"
