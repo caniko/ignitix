@@ -2,8 +2,7 @@
   inputs,
   installMediaLib,
   lib,
-}:
-{
+}: {
   extraModules ? [],
   hostname,
   packageName ? "${hostname}-sd-image",

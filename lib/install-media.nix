@@ -68,10 +68,7 @@
     ipv4RouteMetric ? null,
     deviceMac,
     hostMac,
-  }: {
-    pkgs,
-    ...
-  }: {
+  }: {pkgs, ...}: {
     hardware.deviceTree.overlays = [
       {
         inherit name;
@@ -199,26 +196,26 @@
         RemainAfterExit = true;
       };
       script = ''
-        for _ in $(${pkgs.coreutils}/bin/seq 1 20); do
-          if [ -d /sys/class/net/${interfaceName} ]; then
-            break
-          fi
-          ${pkgs.coreutils}/bin/sleep 1
-        done
+                for _ in $(${pkgs.coreutils}/bin/seq 1 20); do
+                  if [ -d /sys/class/net/${interfaceName} ]; then
+                    break
+                  fi
+                  ${pkgs.coreutils}/bin/sleep 1
+                done
 
-        if [ ! -d /sys/class/net/${interfaceName} ]; then
-          echo "No ${interfaceName} interface found for USB gadget networking" >&2
-          exit 1
-        fi
+                if [ ! -d /sys/class/net/${interfaceName} ]; then
+                  echo "No ${interfaceName} interface found for USB gadget networking" >&2
+                  exit 1
+                fi
 
-        ${pkgs.iproute2}/bin/ip link set dev ${interfaceName} up
+                ${pkgs.iproute2}/bin/ip link set dev ${interfaceName} up
 
-        ${pkgs.networkmanager}/bin/nmcli connection reload
-        if ! ${pkgs.networkmanager}/bin/nmcli connection up usb-gadget ifname ${interfaceName}; then
-          ${pkgs.iproute2}/bin/ip addr replace ${ipv4Address} dev ${interfaceName}
-${lib.optionalString (ipv4Gateway != null) ''
+                ${pkgs.networkmanager}/bin/nmcli connection reload
+                if ! ${pkgs.networkmanager}/bin/nmcli connection up usb-gadget ifname ${interfaceName}; then
+                  ${pkgs.iproute2}/bin/ip addr replace ${ipv4Address} dev ${interfaceName}
+        ${lib.optionalString (ipv4Gateway != null) ''
           ${pkgs.iproute2}/bin/ip route replace default via ${ipv4Gateway} dev ${interfaceName}${lib.optionalString (ipv4RouteMetric != null) " metric ${ipv4RouteMetric}"}
-''}${lib.optionalString (ipv4Dns != null) ''
+        ''}${lib.optionalString (ipv4Dns != null) ''
           if ${pkgs.systemd}/bin/systemctl -q is-active systemd-resolved.service; then
             ${pkgs.systemd}/bin/resolvectl dns ${interfaceName} ${ipv4Dns}
           elif [ -x ${pkgs.openresolv}/bin/resolvconf ]; then
@@ -226,8 +223,8 @@ ${lib.optionalString (ipv4Gateway != null) ''
           else
             printf 'nameserver %s\n' ${lib.escapeShellArg ipv4Dns} > /etc/resolv.conf
           fi
-''}
-        fi
+        ''}
+                fi
       '';
     };
   };
@@ -334,7 +331,7 @@ ${lib.optionalString (ipv4Gateway != null) ''
         }
         // nixosAnywhere
         // optionalAttrs (nixosAnywhere ? endpoints) {
-          endpoints = nixosAnywhere.endpoints;
+          inherit (nixosAnywhere) endpoints;
         };
     };
 
@@ -395,7 +392,7 @@ ${lib.optionalString (ipv4Gateway != null) ''
         }
         // nixosAnywhere
         // optionalAttrs (nixosAnywhere ? endpoints) {
-          endpoints = nixosAnywhere.endpoints;
+          inherit (nixosAnywhere) endpoints;
         };
     };
 in {
