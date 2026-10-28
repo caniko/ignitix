@@ -23,9 +23,16 @@ in
     modules =
       [
         ../../nixos/modules/raspberrypi3bplus.nix
-        {
+        ({pkgs, ...}: {
           image.baseName = mkForce packageName;
-        }
+
+          # bootswain owns the board firmware (bootcode, start/fixup, DTBs,
+          # U-Boot, config.txt). linkFarm entries are symlinks into the store,
+          # so dereference and drop store modes for mcopy.
+          sdImage.populateFirmwareCommands = mkForce ''
+            cp -rL --no-preserve=mode ${inputs.bootswain.packages.${pkgs.stdenv.buildPlatform.system}.raspberrypi3bplus-firmware}/. firmware/
+          '';
+        })
       ]
       ++ extraModules;
   }

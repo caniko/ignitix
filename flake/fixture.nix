@@ -44,6 +44,11 @@ in {
     rootAuthorizedKeys = [];
   };
 
+  ignitix.installMedia.example-raspberrypi3bplus = ignitixLib.catalog.raspberryPi3BPlusSdImage {
+    hostname = "example-raspberrypi3bplus";
+    packageName = "example-raspberrypi3bplus";
+  };
+
   ignitix.installMedia.example-x86_64-installer = ignitixLib.mkInstallerMedia {
     hostname = "example-x86_64-installer";
     packageName = "example-x86_64-installer";
@@ -83,6 +88,7 @@ in {
     exampleCrossbow = self.nixosConfigurations.example-crossbow.config;
     exampleRockpro64 = self.nixosConfigurations.example-rockpro64-installer.config;
     exampleX86_64 = self.nixosConfigurations.example-x86_64-installer.config;
+    examplePi = self.nixosConfigurations.example-raspberrypi3bplus.config;
     contract = {
       toplevelDrvPath =
         builtins.unsafeDiscardStringContext
@@ -104,6 +110,14 @@ in {
       test ${lib.escapeShellArg (lib.boolToString exampleX86_64.services.openssh.settings.PasswordAuthentication)} = false
       test ${lib.escapeShellArg (lib.boolToString exampleX86_64.services.openssh.settings.KbdInteractiveAuthentication)} = false
       grep -F -- ${lib.escapeShellArg fixtureAuthorizedKey} <<< ${lib.escapeShellArg (builtins.toJSON exampleX86_64.users.users.root.openssh.authorizedKeys.keys)}
+      touch "$out"
+    '';
+
+    # Eval-only: the aarch64 image is never realized in checks.
+    checks.raspberrypi3bplus-image-firmware = pkgs.runCommand "raspberrypi3bplus-image-firmware" {} ''
+      test -n ${lib.escapeShellArg (builtins.unsafeDiscardStringContext examplePi.system.build.sdImage.drvPath)}
+      grep -F raspberrypi3bplus-firmware <<< ${lib.escapeShellArg (builtins.unsafeDiscardStringContext examplePi.sdImage.populateFirmwareCommands)}
+      grep -F console=ttyS1,115200n8 <<< ${lib.escapeShellArg (toString examplePi.boot.kernelParams)}
       touch "$out"
     '';
 

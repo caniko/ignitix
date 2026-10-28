@@ -15,6 +15,11 @@
     nixos-anywhere.url = "github:nix-community/nixos-anywhere";
 
     nixos-hardware.url = "github:NixOS/nixos-hardware";
+    bootswain = {
+      url = "github:caniko/bootswain";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.plinth.follows = "plinth";
+    };
     plinth = {
       url = "git+https://github.com/caniko/plinth.git?ref=refs/heads/trunk";
       inputs.nixpkgs.follows = "nixpkgs";
