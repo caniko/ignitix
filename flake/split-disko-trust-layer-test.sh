@@ -11,8 +11,8 @@ state="$work/state"
 mkdir -p "$bin" "$state"
 
 {
-printf '#!%s\n' "$(command -v bash)"
-cat <<'EOF'
+  printf '#!%s\n' "$(command -v bash)"
+  cat <<'EOF'
 set -euo pipefail
 
 cmd="${@: -1}"
@@ -69,8 +69,8 @@ EOF
 } >"$bin/ssh"
 
 {
-printf '#!%s\n' "$(command -v bash)"
-cat <<'EOF'
+  printf '#!%s\n' "$(command -v bash)"
+  cat <<'EOF'
 set -euo pipefail
 
 printf 'nix\t%s\n' "$*" >>"$STATE/calls.log"
@@ -149,7 +149,7 @@ assert_status() {
   local want=$2
   local got
   got=$(status_of "$name")
-  if [[ "$got" != "$want" ]]; then
+  if [[ $got != "$want" ]]; then
     echo "$name: expected status $want, got $got" >&2
     cat "$state/$name.out" >&2 || true
     cat "$state/$name.err" >&2 || true
@@ -169,7 +169,7 @@ assert_repairs() {
   local expected=$1
   local actual
   actual=$(sort "$state/repairs.log" | tr '\n' ' ')
-  if [[ "$actual" != "$expected" ]]; then
+  if [[ $actual != "$expected" ]]; then
     echo "expected repairs '$expected', got '$actual'" >&2
     cat "$state/calls.log" >&2
     exit 1
@@ -290,7 +290,7 @@ set +e
 (copy_after_verify) >"$state/copy_gate.out" 2>"$state/copy_gate.err"
 copy_gate_status=$?
 set -e
-if [[ "$copy_gate_status" == 0 ]]; then
+if [[ $copy_gate_status == 0 ]]; then
   echo "copy gate unexpectedly succeeded" >&2
   exit 1
 fi

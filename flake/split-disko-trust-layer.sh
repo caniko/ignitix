@@ -16,7 +16,7 @@ collect_remote_closure_mismatches() {
   }
 
   while IFS= read -r path; do
-    [[ -n "$path" ]] || continue
+    [[ -n $path ]] || continue
 
     # Trust Nix's registered NAR hash for the path, not the bytes we
     # just found on disk. The actual hash is only used to detect
@@ -32,7 +32,7 @@ collect_remote_closure_mismatches() {
       exit 1
     }
 
-    if [[ ! "$registered_nar_sri" =~ ^sha256- ]]; then
+    if [[ ! $registered_nar_sri =~ ^sha256- ]]; then
       echo "Remote path '$path' has no trusted registered sha256 NAR hash." >&2
       echo "Refusing to derive expected hash from actual path contents." >&2
       exit 1
@@ -52,7 +52,7 @@ collect_remote_closure_mismatches() {
       exit 1
     }
 
-    if [[ "$registered_nar_nix32" != "$actual_nix32" ]]; then
+    if [[ $registered_nar_nix32 != "$actual_nix32" ]]; then
       printf -v remote_cmd 'nix-store -q --deriver %q 2>/dev/null || true' "$path"
       # shellcheck disable=SC2029
       deriver=$(ssh -n "${installer_ssh_args[@]}" "$target_host" "$remote_cmd")
@@ -69,11 +69,11 @@ print_remote_closure_mismatches() {
   local deriver
 
   while IFS=$'\t' read -r path registered_nar_nix32 actual_nix32 deriver; do
-    [[ -n "$path" ]] || continue
+    [[ -n $path ]] || continue
     printf '  %s\n' "$path" >&2
     printf '    registered NAR hash: %s\n' "$registered_nar_nix32" >&2
     printf '    actual:    %s\n' "$actual_nix32" >&2
-    if [[ -n "$deriver" && "$deriver" != "unknown-deriver" ]]; then
+    if [[ -n $deriver && $deriver != "unknown-deriver" ]]; then
       printf '    deriver:   %s\n' "$deriver" >&2
     fi
   done <<<"$mismatches"
@@ -88,7 +88,7 @@ repair_remote_closure_mismatches() {
   local remote_cmd
 
   while IFS=$'\t' read -r path registered_nar_nix32 actual_nix32 deriver; do
-    [[ -n "$path" ]] || continue
+    [[ -n $path ]] || continue
     printf -v remote_cmd 'nix-store --repair-path %q' "$path"
     # shellcheck disable=SC2029
     ssh -n "${installer_ssh_args[@]}" "$target_host" "$remote_cmd" || return 1
@@ -104,7 +104,7 @@ verify_or_repair_remote_disko_closure() {
   if ! mismatches=$(collect_remote_closure_mismatches "$disko_script_path"); then
     exit 1
   fi
-  if [[ -z "$mismatches" ]]; then
+  if [[ -z $mismatches ]]; then
     return 0
   fi
 
@@ -116,7 +116,7 @@ verify_or_repair_remote_disko_closure() {
     echo "Failed to repair corrupt remote disko store path(s) on '$target_host'." >&2
     echo "Manual repair command(s):" >&2
     while IFS=$'\t' read -r path _expected _actual _deriver; do
-      [[ -n "$path" ]] || continue
+      [[ -n $path ]] || continue
       printf "  ssh %q 'nix-store --repair-path %q'\n" "$target_host" "$path" >&2
     done <<<"$mismatches"
     echo "Validation command:" >&2
@@ -127,12 +127,12 @@ verify_or_repair_remote_disko_closure() {
   if ! remaining_mismatches=$(collect_remote_closure_mismatches "$disko_script_path"); then
     exit 1
   fi
-  if [[ -n "$remaining_mismatches" ]]; then
+  if [[ -n $remaining_mismatches ]]; then
     echo "Remote disko closure is still corrupt after targeted repair on '$target_host':" >&2
     print_remote_closure_mismatches "$remaining_mismatches"
     echo "Manual repair command(s):" >&2
     while IFS=$'\t' read -r path _expected _actual _deriver; do
-      [[ -n "$path" ]] || continue
+      [[ -n $path ]] || continue
       printf "  ssh %q 'nix-store --repair-path %q'\n" "$target_host" "$path" >&2
     done <<<"$remaining_mismatches"
     echo "Deep validation command:" >&2

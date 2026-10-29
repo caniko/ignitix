@@ -1,27 +1,9 @@
-{
-  lib,
-  ...
-}: {
-  perSystem = {pkgs, ...}: let
-    website = pkgs.stdenv.mkDerivation {
-      pname = "ignitix-website";
-      version = "0.1.0";
-      src = lib.fileset.toSource {
-        root = ../website;
-        fileset = lib.fileset.maybeMissing ../website;
-      };
-      nativeBuildInputs = [pkgs.zola];
-      phases = ["buildPhase" "installPhase"];
-      buildPhase = ''
-        cp -r --no-preserve=mode $src site
-        cd site
-        zola build
-      '';
-      installPhase = ''
-        cp -r public $out
-      '';
-    };
-
+{lib, ...}: {
+  perSystem = {
+    config,
+    pkgs,
+    ...
+  }: let
     docs = pkgs.stdenv.mkDerivation {
       pname = "ignitix-docs";
       version = "0.1.0";
@@ -55,6 +37,7 @@
     devShells.default = pkgs.mkShell {
       packages = [
         pkgs.mdbook
+        config.formatter
       ];
 
       shellHook = ''

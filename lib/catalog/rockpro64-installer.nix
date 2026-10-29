@@ -1,9 +1,7 @@
 {
   inputs,
   installMediaLib,
-  lib,
-}:
-{
+}: {
   extraModules ? [],
   hostname ? "rockpro64-installer",
   packageName ? "rockpro64",
@@ -34,102 +32,106 @@
     "lsm=landlock,yama,bpf"
   ];
 in
-installMediaLib.mkInstallerMedia {
-  inherit
-    hostname
-    packageName
-    rootAuthorizedKeys
-    ;
+  installMediaLib.mkInstallerMedia {
+    inherit
+      hostname
+      packageName
+      rootAuthorizedKeys
+      ;
 
-  system = "aarch64-linux";
-  imageModule =
-    inputs.nixpkgs + "/nixos/modules/installer/sd-card/sd-image-aarch64-installer.nix";
-  nixosAnywhere = {
-    enable = true;
-    targetUser = "root";
-    targetPort = 22;
-    phases = [
-      "disko"
-      "install"
-      "reboot"
-    ];
-    noDiskoDeps = true;
-    endpoints.usb.host = resolvedUsbGadget.endpointHost;
-  };
+    system = "aarch64-linux";
+    imageModule =
+      inputs.nixpkgs + "/nixos/modules/installer/sd-card/sd-image-aarch64-installer.nix";
+    nixosAnywhere = {
+      enable = true;
+      targetUser = "root";
+      targetPort = 22;
+      phases = [
+        "disko"
+        "install"
+        "reboot"
+      ];
+      noDiskoDeps = true;
+      endpoints.usb.host = resolvedUsbGadget.endpointHost;
+    };
 
-  modules =
-    [
-      ../../nixos/modules/nixos-facter-overlay.nix
-      ../../nixos/modules/rockpro64.nix
-      ({config, lib, ...}:
-        lib.mkMerge [
-          {
-            ignitix.hardware.rockpro64.towBootSerialHandoff = towBootSerialHandoff;
+    modules =
+      [
+        ../../nixos/modules/nixos-facter-overlay.nix
+        ../../nixos/modules/rockpro64.nix
+        ({
+          config,
+          lib,
+          ...
+        }:
+          lib.mkMerge [
+            {
+              ignitix.hardware.rockpro64.towBootSerialHandoff = towBootSerialHandoff;
 
-            system.installer.channel.enable = false;
-            boot.zfs.forceImportRoot = false;
-            programs.fuse.enable = lib.mkForce false;
-            hardware.bluetooth.enable = lib.mkForce false;
-            hardware.fancontrol.enable = lib.mkForce false;
+              system.installer.channel.enable = false;
+              boot.zfs.forceImportRoot = false;
+              programs.fuse.enable = lib.mkForce false;
+              hardware.bluetooth.enable = lib.mkForce false;
+              hardware.fancontrol.enable = lib.mkForce false;
 
-            boot.blacklistedKernelModules = [
-              "bluetooth"
-              "btbcm"
-              "hci_uart"
-              "brcmfmac"
-              "cfg80211"
-              "rfkill"
-            ];
+              boot.blacklistedKernelModules = [
+                "bluetooth"
+                "btbcm"
+                "hci_uart"
+                "brcmfmac"
+                "cfg80211"
+                "rfkill"
+              ];
 
-            hardware.deviceTree.overlays = [
-              {
-                name = "rockpro64-disable-pcie";
-                filter = "rk3399-rockpro64.dtb";
-                dtsText = ''
-                  /dts-v1/;
-                  /plugin/;
+              hardware.deviceTree.overlays = [
+                {
+                  name = "rockpro64-disable-pcie";
+                  filter = "rk3399-rockpro64.dtb";
+                  dtsText = ''
+                    /dts-v1/;
+                    /plugin/;
 
-                  / {
-                    compatible = "pine64,rockpro64-v2.1", "pine64,rockpro64", "rockchip,rk3399";
-                  };
+                    / {
+                      compatible = "pine64,rockpro64-v2.1", "pine64,rockpro64", "rockchip,rk3399";
+                    };
 
-                  &{/pcie@f8000000} {
-                    status = "disabled";
-                  };
-                '';
-              }
-            ];
+                    &{/pcie@f8000000} {
+                      status = "disabled";
+                    };
+                  '';
+                }
+              ];
 
-            boot.kernelParams =
-              if towBootSerialHandoff
-              then
-                lib.mkForce (
-                  config.ignitix.hardware.rockpro64.serialKernelParams
-                  ++ commonKernelParams
-                )
-              else
-                lib.mkAfter commonKernelParams;
-          }
-          (lib.mkIf minimalHeadlessInitrd {
-            # Keep the installer focused on headless bootstrap over Ethernet/USB-C
-            # rather than probing optional desktop/NVMe hardware during initrd.
-            boot.initrd.kernelModules = lib.mkForce [
-              "dm_mod"
-              "dwmac_rk"
-            ];
-          })
-        ])
-      (installMediaLib.mkRockpro64UsbEthernetGadgetModule {
-        name = "rockpro64-usb-c-gadget";
-        inherit (resolvedUsbGadget)
-          deviceMac
-          hostMac
-          ipv4Address
-          ipv4Dns
-          ipv4Gateway
-          ipv4RouteMetric
-          ;
-      })
-    ]
-    ++ extraModules;
-}
+              boot.kernelParams =
+                if towBootSerialHandoff
+                then
+                  lib.mkForce (
+                    config.ignitix.hardware.rockpro64.serialKernelParams
+                    ++ commonKernelParams
+                  )
+                else lib.mkAfter commonKernelParams;
+            }
+            (lib.mkIf minimalHeadlessInitrd {
+              # Keep the installer focused on headless bootstrap over Ethernet/USB-C
+              # rather than probing optional desktop/NVMe hardware during initrd.
+              boot.initrd.kernelModules = lib.mkForce [
+                "dm_mod"
+                "dwmac_rk"
+              ];
+            })
+          ])
+        (installMediaLib.mkRockpro64UsbEthernetGadgetModule {
+          name = "rockpro64-usb-c-gadget";
+          inherit
+            (resolvedUsbGadget)
+            deviceMac
+            hostMac
+            ipv4Address
+            ipv4Dns
+            ipv4Gateway
+            ipv4RouteMetric
+            ;
+        })
+      ]
+      ++ extraModules;
+  }

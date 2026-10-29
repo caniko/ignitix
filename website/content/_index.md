@@ -23,11 +23,11 @@ title = "Bootswain Serial Friendly"
 body = "Document bidirectional RockPro64 serial workflows that read board TXD and send U-Boot commands through board RXD."
 
 [[extra.features]]
-title = "Canix Metadata Friendly"
+title = "Host Metadata Friendly"
 body = "Keep host facts in downstream infrastructure data while Ignitix supplies reusable install-media and target machinery."
 
 [[extra.features]]
 title = "Publish The Project"
-body = "Build the landing page and mdBook documentation as a single Codeberg Pages output with Nix."
+body = "Build the landing page and mdBook documentation as a single static-site output with Nix."
 +++
 

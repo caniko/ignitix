@@ -6,22 +6,21 @@
 in
   installMediaLib
   // {
+    patchNixosAnywhere = import ./nixos-anywhere.nix;
+    bootstrapSshOptions = import ./bootstrap-ssh.nix;
     catalog = {
-      rockpro64Installer =
-        import ./catalog/rockpro64-installer.nix {
-          inherit
-            inputs
-            installMediaLib
-            lib
-            ;
-        };
-      raspberryPi3BPlusSdImage =
-        import ./catalog/raspberrypi3bplus-sd-image.nix {
-          inherit
-            inputs
-            installMediaLib
-            lib
-            ;
-        };
+      rockpro64Installer = import ./catalog/rockpro64-installer.nix {
+        inherit
+          inputs
+          installMediaLib
+          ;
+      };
+      raspberryPi3BPlusSdImage = import ./catalog/raspberrypi3bplus-sd-image.nix {
+        inherit
+          inputs
+          installMediaLib
+          lib
+          ;
+      };
     };
   }

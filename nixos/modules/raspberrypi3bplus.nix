@@ -16,7 +16,7 @@
   boot.loader.generic-extlinux-compatible.enable = lib.mkDefault true;
 
   boot.kernelParams = lib.mkForce [
-    "console=ttyAMA0,115200n8"
+    "console=ttyS1,115200n8"
     "console=tty0"
   ];
 }

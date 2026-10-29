@@ -1,4 +1,4 @@
-base_url = "https://caniko.codeberg.page/ignitix"
+base_url = "https://ignitix.tartanoglu.com"
 title = "Ignitix"
 description = "Reusable NixOS install media and install target workflows"
 default_language = "en"
@@ -12,4 +12,3 @@ hard_link_static = true
 [markdown]
 [markdown.highlighting]
 theme = "nord"
-
