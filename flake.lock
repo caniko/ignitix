@@ -1716,7 +1716,12 @@
         "nixos-anywhere": "nixos-anywhere",
         "nixos-hardware": "nixos-hardware",
         "nixpkgs": "nixpkgs_4",
-        "plinth": "plinth"
+        "plinth": "plinth",
+        "treefmt-nix": [
+          "bootswain",
+          "harbor-rs",
+          "treefmt-nix"
+        ]
       }
     },
     "rs-harbor": {

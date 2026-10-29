@@ -12,6 +12,7 @@
     };
 
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    treefmt-nix.follows = "bootswain/harbor-rs/treefmt-nix";
     nixos-anywhere.url = "github:nix-community/nixos-anywhere";
 
     nixos-hardware.url = "github:NixOS/nixos-hardware";
@@ -35,6 +36,7 @@
       imports = [./flake];
       perSystem = {
         lib,
+        pkgs,
         system,
         ...
       }: let
@@ -44,6 +46,7 @@
           configPath = ./website/plinth-project.toml;
         };
       in {
+        formatter = (inputs.treefmt-nix.lib.evalModule pkgs (import ./nix/treefmt.nix {rustfmtPackage = pkgs.rustfmt;})).config.build.wrapper;
         packages.website = website;
         packages.site = lib.mkForce website;
         apps.deploy-pages = inputs.plinth.lib.${system}.mkDeployPagesApp {

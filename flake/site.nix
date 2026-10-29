@@ -1,5 +1,9 @@
 {lib, ...}: {
-  perSystem = {pkgs, ...}: let
+  perSystem = {
+    config,
+    pkgs,
+    ...
+  }: let
 
     docs = pkgs.stdenv.mkDerivation {
       pname = "ignitix-docs";
@@ -34,6 +38,7 @@
     devShells.default = pkgs.mkShell {
       packages = [
         pkgs.mdbook
+        config.formatter
       ];
 
       shellHook = ''
