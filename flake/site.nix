@@ -4,7 +4,6 @@
     pkgs,
     ...
   }: let
-
     docs = pkgs.stdenv.mkDerivation {
       pname = "ignitix-docs";
       version = "0.1.0";
