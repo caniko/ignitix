@@ -2,7 +2,7 @@
 
 <!-- simit:badges:start -->
 
-[![CI](https://img.shields.io/badge/CI-managed-2088ff)](.github/workflows/ci.yaml) [![docs](https://img.shields.io/badge/docs-enabled-6f42c1)](docs)
+[![CI](https://img.shields.io/badge/CI-drift-2088ff)](https://github.com/caniko/fleet/actions) [![docs](https://img.shields.io/badge/docs-enabled-6f42c1)](docs)
 
 <!-- simit:badges:end -->
 
