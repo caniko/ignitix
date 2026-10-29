@@ -8,7 +8,6 @@
           "crane"
         ],
         "flake-utils": "flake-utils",
-        "harbor-macos-sdk-pin": "harbor-macos-sdk-pin",
         "harbor-rs": "harbor-rs",
         "nixpkgs": [
           "nixpkgs"
@@ -20,14 +19,19 @@
           "bootswain",
           "harbor-rs",
           "rust-overlay"
+        ],
+        "treefmt-nix": [
+          "bootswain",
+          "harbor-rs",
+          "treefmt-nix"
         ]
       },
       "locked": {
-        "lastModified": 1792852117,
-        "narHash": "sha256-dd3BjWI5XM073CoGTCBWL2dMMorlHUPVmB/A9hYrvCM=",
+        "lastModified": 1793292249,
+        "narHash": "sha256-QYQ5w99DoAbiAUlxV8iim5ePBkRzUx3XNpMrRM9eW1w=",
         "owner": "caniko",
         "repo": "bootswain",
-        "rev": "884b5b7b88a9791ee70663d33d382470a764d810",
+        "rev": "68f99437e3731b98d036f2b0f168a38ef37bf0d3",
         "type": "github"
       },
       "original": {
@@ -729,22 +733,6 @@
         "ref": "trunk",
         "repo": "harbor-android",
         "type": "github"
-      }
-    },
-    "harbor-macos-sdk-pin": {
-      "locked": {
-        "lastModified": 1791442905,
-        "narHash": "sha256-sNh6JpHuvsD1dJs+/pyjbGE3SHpJ0J9VCu1/22KjH2A=",
-        "ref": "trunk",
-        "rev": "9762fd3652db7ebb3f92db8ad18b6e3253097f58",
-        "revCount": 11,
-        "type": "git",
-        "url": "https://github.com/caniko/harbor-macos-sdk-pin.git"
-      },
-      "original": {
-        "ref": "trunk",
-        "type": "git",
-        "url": "https://github.com/caniko/harbor-macos-sdk-pin.git"
       }
     },
     "harbor-meta": {
