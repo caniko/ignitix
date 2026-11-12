@@ -1,41 +1,80 @@
 [site]
 title = "Ignitix"
-description = "Ignitix is a reusable Nix flake for building NixOS install media and host-oriented install workflows."
+description = "A flake that packages board-specific installer images and nixos-anywhere wrappers, so a downstream flake keeps its install policy next to its own host metadata."
 base_url = "/"
-footer_note = "Generated from repository metadata by the plinth-project FOSS sweep."
 
 [[nav]]
 label = "Overview"
 href = "#overview"
 
 [[nav]]
+label = "Quick start"
+href = "#install"
+
+[[nav]]
 label = "Source"
-href = "ssh://git@github.com/caniko/ignitix.git"
+href = "https://github.com/caniko/ignitix"
 
 [[footer_links]]
 label = "Source"
-href = "ssh://git@github.com/caniko/ignitix.git"
+href = "https://github.com/caniko/ignitix"
 
 [[pages]]
 slug = "index"
 title = "Ignitix"
-description = "Ignitix is a reusable Nix flake for building NixOS install media and host-oriented install workflows."
+description = "A flake that packages board-specific installer images and nixos-anywhere wrappers, so a downstream flake keeps its install policy next to its own host metadata."
 
 [[pages.sections]]
 type = "hero"
 title = "Ignitix"
-tagline = "Reusable NixOS installer media and workflows"
-subtitle = "Build board-specific images and host-first install targets with nixos-anywhere wrappers."
+tagline = "Reusable NixOS install media for headless bootstrap."
+subtitle = "A flake that packages board-specific installer images and nixos-anywhere wrappers, so a downstream flake keeps its install policy next to its own host metadata."
 
 [[pages.sections.ctas]]
 label = "View source"
-href = "ssh://git@github.com/caniko/ignitix.git"
+href = "https://github.com/caniko/ignitix"
 primary = true
+
+[[pages.sections.ctas]]
+label = "Quick start"
+href = "#install"
 
 [[pages.sections]]
 type = "feature_grid"
 id = "overview"
 
 [[pages.sections.features]]
-title = "Nix"
-description = "Project technology detected from repository manifests."
+title = "Installer media as flake modules"
+description = "Consumers import the install-media flake-parts module and declare media in their own flake, so board image definitions stop being copied between infrastructure repositories."
+
+[[pages.sections.features]]
+title = "ROCKPro64 over one USB-C link"
+description = "The bundled ROCKPro64 entry ships serial console visibility and USB-C gadget networking on a point-to-point 10.55.0.0/24 install link, so a board without a display can be installed."
+
+[[pages.sections.features]]
+title = "Install, mount, rescue and probe wrappers"
+description = "Host-first install targets wrap nixos-anywhere for first install, mount, rescue and hardware probing, which keeps the invocation in the flake instead of in shell history."
+
+[[pages.sections.features]]
+title = "Bootstrap trust is verified"
+description = "Setting nixosAnywhere.bootstrapHostKey resolves to an immutable known_hosts file with strict key checking and key-only authentication, shared by the install, probe and mount clients."
+
+[[pages.sections]]
+type = "install"
+id = "install"
+heading = "Quick start"
+intro = "Add Ignitix as a flake input, import the install-media module, and build the bundled ROCKPro64 fixture image to see the catalog entry in action. The consuming flake supplies its own host metadata."
+guide_href = "https://github.com/caniko/ignitix"
+
+[[pages.sections.primary_routes]]
+label = "Flake input"
+audience = "An infrastructure flake that declares its own install media"
+command = 'ignitix.url = "git+https://github.com/caniko/ignitix.git";'
+href = "https://github.com/caniko/ignitix#quick-start"
+recommended = true
+
+[[pages.sections.secondary_routes]]
+label = "Build the fixture image"
+audience = "From a checkout of this flake"
+command = "nix build .#example-rockpro64"
+href = "https://github.com/caniko/ignitix#rockpro64"
