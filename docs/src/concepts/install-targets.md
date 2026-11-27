@@ -10,11 +10,36 @@ The install target module exposes host-first wrappers:
 - `smount` for mounting an existing disko layout through installer media
 - `rescue` for mounting and reinstalling into an existing layout
 - `probe-hardware` for hardware report capture
+- `disk-diagnose` for boot-media diagnostics
 - `unlock-luks` for a verified, local Iced passphrase prompt that unlocks an
   encrypted target through SSH without placing the passphrase in arguments,
   environment variables, or files
 - `enroll-tpm2-pin` for guarded TPM2+pcrlock enrollment using masked local
   passphrase and PIN fields
+
+## Boot-media CLI
+
+Run the CLI from Ignitix and point it at a consumer flake that imports
+`ignitix.flakeModules.install-targets`:
+
+```bash
+nix run github:caniko/ignitix#ignitix-bootmedia -- install --flake /path/to/consumer usb my-host --build-on split
+nix run github:caniko/ignitix#ignitix-bootmedia -- diagnose --flake /path/to/consumer usb my-host --no-mount --json > report.json
+nix run github:caniko/ignitix#ignitix-bootmedia -- report report.json
+```
+
+`--flake` defaults to the current directory. For `install`, arguments after
+`--` go to `nixos-anywhere`. Diagnosis mounts the installed system by default;
+use `--no-mount` to probe only the live media. `report -` reads from stdin.
+`diagnose` and `report` both accept `--json`; diagnosis preserves the
+collector's exit status even when it prints a valid failure report.
+
+For a local path or `path:` flake, Bootmedia writes a relative automatic
+hardware-report path under that flake directory. For other flake references,
+relative report paths remain relative to the caller. Explicit `nixos-anywhere`
+arguments are still interpreted from the caller's directory.
+
+## Routes
 
 Routes are semantic names such as `lan`, `usb`, or `vpn`. Each route resolves a
 target host from explicit route data, media endpoints, or downstream host

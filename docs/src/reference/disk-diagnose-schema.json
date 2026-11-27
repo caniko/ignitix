@@ -1,0 +1,162 @@
+{
+  "schema_version": "1",
+  "generated_at": "2026-05-12T10:15:00Z",
+  "tool": {
+    "name": "disk-diagnose",
+    "version": "0.1.0"
+  },
+  "target": {
+    "host": "thething",
+    "route": "otg"
+  },
+  "context": {
+    "mode": "mounted",
+    "mounted_system_root": "/mnt"
+  },
+  "bootmedia": {
+    "kernel": {
+      "ok": true,
+      "release": "6.12.31"
+    }
+  },
+  "installed": {
+    "kernel": {
+      "ok": true,
+      "kernel_path": "/mnt/nix/store/aaaaaaaa-linux-6.12.31/bzImage",
+      "release": "6.12.31",
+      "modules_builtin_first_line": "kernel/arch/arm64/crypto/aes-ce-blk.ko"
+    },
+    "bcache_module": {
+      "path": {
+        "ok": true,
+        "module_dir": "/mnt/run/booted-system/kernel-modules/lib/modules/6.12.31/kernel/drivers/md/bcache",
+        "module_path": "/mnt/run/booted-system/kernel-modules/lib/modules/6.12.31/kernel/drivers/md/bcache/bcache.ko.zst",
+        "exists": true
+      },
+      "modinfo": {
+        "ok": true,
+        "file": "/mnt/run/booted-system/kernel-modules/lib/modules/6.12.31/kernel/drivers/md/bcache/bcache.ko.zst",
+        "vermagic": "6.12.31 SMP preempt mod_unload aarch64",
+        "depends": ["crc64", "closure"],
+        "srcversion": "ABCDEF1234567890",
+        "raw": {
+          "filename": "/mnt/run/booted-system/kernel-modules/lib/modules/6.12.31/kernel/drivers/md/bcache/bcache.ko.zst",
+          "name": "bcache",
+          "license": "GPL",
+          "description": "block cache",
+          "author": "",
+          "alias": [],
+          "depends": "crc64,closure",
+          "retpoline": "",
+          "intree": "Y",
+          "vermagic": "6.12.31 SMP preempt mod_unload aarch64",
+          "parm": [],
+          "srcversion": "ABCDEF1234567890"
+        }
+      }
+    },
+    "modprobe_d": [
+      {
+        "path": "/mnt/etc/modprobe.d/bcache.conf",
+        "ok": true,
+        "contents": "options bcache cache_set_uuid=00000000-0000-0000-0000-000000000000\n"
+      }
+    ],
+    "bcache_super": [
+      {
+        "device": "/dev/mmcblk0p2",
+        "resolved_device": "/dev/mmcblk0p2",
+        "role": "cache",
+        "ok": true,
+        "raw": "sb.version 1 [cache device]\n..."
+      }
+    ],
+    "system_profile": {
+      "ok": true,
+      "link": "/mnt/nix/var/nix/profiles/system",
+      "target": "/nix/store/bbbbbbbb-nixos-system-thething-26.05.20260512"
+    }
+  },
+  "live": {
+    "modprobe": {
+      "bcache": {
+        "ok": false,
+        "error": "modprobe returned non-zero",
+        "exit_status": 1,
+        "stdout": "",
+        "stderr": "modprobe: ERROR: could not insert 'bcache': Invalid argument"
+      }
+    },
+    "dmesg": {
+      "bcache": {
+        "ok": true,
+        "lines": [
+          "bcache: disagrees about version of symbol module_layout",
+          "bcache: version magic '6.12.30 SMP preempt mod_unload aarch64' should be '6.12.31 SMP preempt mod_unload aarch64'"
+        ]
+      }
+    }
+  },
+  "disks": {
+    "lsblk": {
+      "ok": true,
+      "devices": {
+        "blockdevices": []
+      }
+    },
+    "by_partlabel": {
+      "ok": true,
+      "entries": [
+        {
+          "name": "disk-mmc-cache",
+          "path": "/dev/disk/by-partlabel/disk-mmc-cache",
+          "target": "../../mmcblk0p2",
+          "resolved_device": "/dev/mmcblk0p2"
+        }
+      ]
+    },
+    "gpt": [
+      {
+        "device": "/dev/mmcblk0",
+        "ok": true,
+        "header": {
+          "disk_identifier": "1234-ABCD",
+          "holds": "128",
+          "main_table_sectors": "2-33",
+          "first_usable_sector": "2048",
+          "last_usable_sector": "61071326",
+          "partitions_free_space": []
+        },
+        "partitions": [
+          {
+            "number": 2,
+            "start": "1050624",
+            "end": "61071326",
+            "size": "28.6 GiB",
+            "code": "8300",
+            "name": "disk-mmc-cache"
+          }
+        ],
+        "raw": "Disk /dev/mmcblk0: ..."
+      },
+      {
+        "device": "/dev/mmcblk1",
+        "ok": false,
+        "error": "sgdisk -p failed"
+      }
+    ],
+    "blkid": [
+      {
+        "device": "/dev/mmcblk0p2",
+        "resolved_device": "/dev/mmcblk0p2",
+        "label": "disk-mmc-cache",
+        "ok": true,
+        "properties": {
+          "DEVNAME": "/dev/mmcblk0p2",
+          "PARTLABEL": "disk-mmc-cache"
+        }
+      }
+    ]
+  },
+  "probe_log": "running probe: bootmedia.kernel\nrunning probe: installed.kernel\nrunning probe: disks.gpt\n"
+}
