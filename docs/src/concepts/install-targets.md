@@ -34,6 +34,11 @@ use `--no-mount` to probe only the live media. `report -` reads from stdin.
 `diagnose` and `report` both accept `--json`; diagnosis preserves the
 collector's exit status even when it prints a valid failure report.
 
+For a local path or `path:` flake, Bootmedia writes a relative automatic
+hardware-report path under that flake directory. For other flake references,
+relative report paths remain relative to the caller. Explicit `nixos-anywhere`
+arguments are still interpreted from the caller's directory.
+
 ## Routes
 
 Routes are semantic names such as `lan`, `usb`, or `vpn`. Each route resolves a

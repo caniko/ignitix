@@ -61,12 +61,49 @@ pub fn app_command(flake: &str, app: App, route: &str, host: &str) -> Result<Com
         "unknown route {route:?} for {host:?}; available routes: {}",
         target.routes.keys().cloned().collect::<Vec<_>>().join(", ")
     );
+    wrapper_command(flake, app, route, host, &target.flake_uri)
+}
+
+fn wrapper_command(
+    flake: &str,
+    app: App,
+    route: &str,
+    host: &str,
+    target_flake: &str,
+) -> Result<Command> {
     let name = match app {
         App::Install => "install",
         App::Diagnose => "disk-diagnose",
     };
+    let attr = target_flake
+        .strip_prefix(".#")
+        .filter(|attr| !attr.is_empty())
+        .with_context(|| format!("expected a relative target flake URI, got {target_flake:?}"))?;
     let mut command = Command::new("nix");
-    command.args(["run", &format!("{flake}#{name}"), "--", route, host]);
+    command.args([
+        "run",
+        &format!("{flake}#{name}"),
+        "--",
+        route,
+        host,
+        "--flake",
+        &format!("{flake}#{attr}"),
+    ]);
+    if matches!(app, App::Install) {
+        let local = flake
+            .strip_prefix("path:")
+            .map(|path| path.split('?').next().unwrap_or(path))
+            .or_else(|| {
+                (matches!(flake, "." | "..")
+                    || ["/", "./", "../"]
+                        .iter()
+                        .any(|prefix| flake.starts_with(prefix)))
+                .then_some(flake)
+            });
+        if let Some(root) = local {
+            command.env("IGNITIX_HARDWARE_REPORT_ROOT", root);
+        }
+    }
     Ok(command)
 }
 
@@ -76,4 +113,36 @@ fn validate_flake(flake: &str) -> Result<()> {
         "--flake must be a flake reference without an output fragment"
     );
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wrappers_use_the_consumer_configuration_without_changing_directory() {
+        for (app, output) in [(App::Install, "install"), (App::Diagnose, "disk-diagnose")] {
+            let cmd = wrapper_command("path:/consumer", app, "lan", "host", ".#custom").unwrap();
+            assert_eq!(
+                cmd.get_args().collect::<Vec<_>>(),
+                [
+                    "run",
+                    &format!("path:/consumer#{output}"),
+                    "--",
+                    "lan",
+                    "host",
+                    "--flake",
+                    "path:/consumer#custom"
+                ]
+            );
+            assert!(cmd.get_current_dir().is_none());
+            assert_eq!(
+                cmd.get_envs()
+                    .find(|(name, _)| *name == "IGNITIX_HARDWARE_REPORT_ROOT")
+                    .and_then(|(_, value)| value)
+                    .and_then(|value| value.to_str()),
+                matches!(app, App::Install).then_some("/consumer")
+            );
+        }
+    }
 }

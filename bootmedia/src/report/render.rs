@@ -150,7 +150,7 @@ mod tests {
             ok: true,
             data: BootmediaKernel {
                 release: "6.12.31".to_string(),
-                vermagic: Some("6.12.31 SMP".to_string()),
+                vermagic: None,
             },
         };
         report.installed.bcache_module.modinfo = Probe::Ok {

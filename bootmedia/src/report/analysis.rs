@@ -52,12 +52,14 @@ fn vermagic_mismatch(report: &DiagnosticReport) -> Option<(&str, &str)> {
 
     let installed = report.installed.bcache_module.modinfo.ok()?;
     let bootmedia = report.bootmedia.kernel.ok()?;
-    let running = bootmedia.vermagic.as_deref().unwrap_or(&bootmedia.release);
-    if installed.vermagic != running {
-        Some((installed.vermagic.as_str(), running))
-    } else {
-        None
-    }
+    let (installed_magic, running) = match bootmedia.vermagic.as_deref() {
+        Some(running) => (installed.vermagic.as_str(), running),
+        None => (
+            installed.vermagic.split_whitespace().next()?,
+            bootmedia.release.as_str(),
+        ),
+    };
+    (installed_magic != running).then_some((installed_magic, running))
 }
 
 fn dmesg_mentions_crypto(report: &DiagnosticReport) -> bool {

@@ -290,6 +290,9 @@
         default_flake=$(jq -r '.flakeUri' <<<"$target_json")
         hardware_backend=$(jq -r '.hardwareReport.backend // empty' <<<"$target_json")
         hardware_path=$(jq -r '.hardwareReport.path // empty' <<<"$target_json")
+        if [[ -n "$hardware_path" && "$hardware_path" != /* && -n "''${IGNITIX_HARDWARE_REPORT_ROOT:-}" ]]; then
+          hardware_path="$IGNITIX_HARDWARE_REPORT_ROOT/$hardware_path"
+        fi
 
         store_paths_mode=false
         explicit_flake=false
@@ -1669,26 +1672,32 @@
                 }
 
                 resolve_mounted_path() {
-                  local current=$1
-                  local target
-                  local depth=0
-
-                  while [[ -L "$current" && "$depth" -lt 20 ]]; do
-                    if ! target=$(readlink "$current" 2>/dev/null); then
-                      return 1
-                    fi
-
-                    if [[ "$target" == /* ]]; then
-                      current="/mnt$target"
+                  local root=''${2:-/mnt} resolved component target rest depth=0
+                  [[ "$1" == "$root/"* ]] || return 1
+                  resolved=$root
+                  rest=''${1#"$root"/}
+                  while [[ -n "$rest" ]]; do
+                    component=''${rest%%/*}
+                    if [[ "$rest" == */* ]]; then rest=''${rest#*/}; else rest=; fi
+                    case "$component" in
+                      ""|.) continue ;;
+                      ..)
+                        if [[ "$resolved" != "$root" ]]; then resolved=''${resolved%/*}; fi
+                        continue
+                        ;;
+                    esac
+                    if [[ -L "$resolved/$component" ]]; then
+                      (( ++depth <= 40 )) || return 1
+                      target=$(readlink -- "$resolved/$component") || return 1
+                      if [[ "$target" == /* ]]; then
+                        resolved=$root
+                      fi
+                      rest="$target/$rest"
                     else
-                      current="$(dirname "$current")/$target"
+                      resolved="$resolved/$component"
                     fi
-
-                    depth=$((depth + 1))
                   done
-
-                  [[ "$depth" -lt 20 ]] || return 1
-                  printf '%s\n' "$current"
+                  printf '%s\n' "$resolved"
                 }
 
                 installed_system_path() {
@@ -2002,8 +2011,8 @@
                 }
 
                 probe_disks_gpt() {
-                  local devices_json=()
-                  for device in /dev/mmcblk0 /dev/mmcblk1; do
+                  local devices_json=() device
+                  while IFS= read -r device; do
                     if [[ ! -b "$device" ]]; then
                       devices_json+=("$(jq -nc --arg device "$device" --arg error "sgdisk -p failed" '{device:$device,ok:false,error:$error}')")
                       continue
@@ -2065,7 +2074,7 @@
                         partitions: $partitions,
                         raw: $raw
                       }')")
-                  done
+                  done < <(jq -r '[.devices.blockdevices[]? | select(.type == "disk") | .path // empty] | unique[]' <<<"$1")
 
                   printf '%s\n' "''${devices_json[@]}" | jq -cs '.'
                 }
@@ -2125,17 +2134,20 @@
                     return
                   fi
 
-                  if [[ ! -d /mnt/etc/modprobe.d ]]; then
+                  local dir file resolved contents
+                  if ! dir=$(resolve_mounted_path /mnt/etc/modprobe.d) || [[ ! -d "$dir" ]]; then
                     jq -nc '[]'
                     return
                   fi
 
                   local items_json=()
-                  while IFS= read -r file; do
-                    [[ -n "$file" ]] || continue
-                    contents=$(cat "$file" 2>/dev/null || true)
-                    items_json+=("$(jq -nc --arg path "$file" --arg contents "$contents" '{path:$path,ok:true,contents:$contents}')")
-                  done < <(find /mnt/etc/modprobe.d -type f | sort)
+                  while IFS= read -r -d "" file; do
+                    if resolved=$(resolve_mounted_path "$file") && [[ -f "$resolved" ]] && contents=$(cat -- "$resolved"); then
+                      items_json+=("$(jq -nc --arg path "$file" --arg contents "$contents" '{path:$path,ok:true,contents:$contents}')")
+                    else
+                      items_json+=("$(jq -nc --arg path "$file" '{path:$path,ok:false,error:"could not read installed modprobe configuration"}')")
+                    fi
+                  done < <(find "$dir" \( -type f -o -type l \) -print0 | sort -z)
 
                   printf '%s\n' "''${items_json[@]}" | jq -cs '.'
                 }
@@ -2210,7 +2222,7 @@
                 live_dmesg_bcache_json=$(probe_live_dmesg_bcache)
                 disks_lsblk_json=$(probe_disks_lsblk)
                 disks_by_partlabel_json=$(probe_disks_by_partlabel)
-                disks_gpt_json=$(probe_disks_gpt)
+                disks_gpt_json=$(probe_disks_gpt "$disks_lsblk_json")
                 disks_blkid_json=$(probe_disks_blkid)
                 installed_modprobe_d_json=$(probe_installed_modprobe_d)
                 installed_bcache_super_json=$(probe_installed_bcache_super)

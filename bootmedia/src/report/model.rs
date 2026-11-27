@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de};
 use serde_json::Value;
 
 pub const SCHEMA_VERSION: &str = "1";
@@ -220,7 +220,7 @@ pub struct BlkidResult {
     pub properties: Value,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(untagged)]
 pub enum Probe<T> {
     Ok {
@@ -232,6 +232,27 @@ pub enum Probe<T> {
         ok: bool,
         error: String,
     },
+}
+
+impl<'de, T: de::DeserializeOwned> Deserialize<'de> for Probe<T> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = Value::deserialize(deserializer)?;
+        match value["ok"].as_bool() {
+            Some(true) => serde_json::from_value(value)
+                .map(|data| Self::Ok { ok: true, data })
+                .map_err(de::Error::custom),
+            Some(false) => Ok(Self::Err {
+                ok: false,
+                error: value["error"]
+                    .as_str()
+                    .ok_or_else(|| de::Error::custom("failed probe requires a string error"))?
+                    .to_owned(),
+            }),
+            None => Err(de::Error::custom(
+                "probe requires a boolean ok discriminator",
+            )),
+        }
+    }
 }
 
 impl<T> Probe<T> {

@@ -21,6 +21,25 @@ fn renders_v1_fixture() {
 }
 
 #[test]
+fn renders_collector_failures_by_discriminator() {
+    let mut json: serde_json::Value = serde_json::from_str(FIXTURE).unwrap();
+    json["live"]["modprobe"]["bcache"] = serde_json::json!({
+        "ok": false, "exit_status": 1, "stdout": "", "stderr": "", "error": "modprobe failed"
+    });
+    json["live"]["dmesg"]["bcache"] = serde_json::json!({"ok": false, "error": "dmesg failed"});
+    json["disks"]["by_partlabel"] = serde_json::json!({"ok": false, "error": "labels unavailable"});
+    let report = report::parse(json.to_string().as_bytes()).unwrap();
+    let rendered = report.human();
+    for expected in [
+        "modprobe bcache: error: modprobe failed",
+        "dmesg bcache: error: dmesg failed",
+        "by-partlabel: error: labels unavailable",
+    ] {
+        assert!(rendered.contains(expected), "{rendered}");
+    }
+}
+
+#[test]
 fn rejects_bad_reports() {
     assert!(report::parse(b"{").is_err());
     assert!(report::parse(b"{\"schema_version\":\"1\"}").is_err());
