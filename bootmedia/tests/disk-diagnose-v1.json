@@ -1,0 +1,101 @@
+{
+  "schema_version": "1",
+  "generated_at": "2026-05-12T10:15:00Z",
+  "tool": { "name": "disk-diagnose", "version": "0.1.0" },
+  "target": { "host": "thething", "route": "otg" },
+  "context": { "mode": "mounted", "mounted_system_root": "/mnt" },
+  "bootmedia": {
+    "kernel": { "ok": true, "release": "6.12.31", "vermagic": "6.12.31 SMP" }
+  },
+  "installed": {
+    "kernel": {
+      "ok": true,
+      "kernel_path": "/mnt/nix/store/aaaaaaaa-linux-6.12.31/bzImage",
+      "release": "6.12.31",
+      "modules_builtin_first_line": "kernel/arch/arm64/crypto/aes-ce-blk.ko"
+    },
+    "bcache_module": {
+      "path": {
+        "ok": true,
+        "module_dir": "/mnt/run/booted-system/kernel-modules/lib/modules/6.12.31/kernel/drivers/md/bcache",
+        "module_path": "/mnt/run/booted-system/kernel-modules/lib/modules/6.12.31/kernel/drivers/md/bcache/bcache.ko.zst",
+        "exists": true
+      },
+      "modinfo": {
+        "ok": true,
+        "file": "/mnt/run/booted-system/kernel-modules/lib/modules/6.12.31/kernel/drivers/md/bcache/bcache.ko.zst",
+        "vermagic": "6.12.31 SMP",
+        "depends": ["crc64"],
+        "srcversion": "ABCDEF1234567890",
+        "raw": {}
+      }
+    },
+    "modprobe_d": [
+      { "ok": true, "path": "/mnt/etc/modprobe.d/bcache.conf", "contents": "options bcache" }
+    ],
+    "bcache_super": [
+      {
+        "ok": true,
+        "device": "/dev/disk/by-partlabel/disk-mmc-cache",
+        "resolved_device": "/dev/mmcblk0p2",
+        "role": "cache",
+        "raw": "sb.version 1"
+      }
+    ],
+    "system_profile": {
+      "ok": true,
+      "link": "/mnt/nix/var/nix/profiles/system",
+      "target": "/nix/store/bbbbbbbb-nixos-system-thething"
+    }
+  },
+  "live": {
+    "modprobe": {
+      "bcache": {
+        "ok": true,
+        "exit_status": 0,
+        "stderr": "",
+        "stdout": ""
+      }
+    },
+    "dmesg": {
+      "bcache": { "ok": true, "lines": ["bcache loaded"] }
+    }
+  },
+  "disks": {
+    "lsblk": { "ok": true, "devices": { "blockdevices": [] } },
+    "by_partlabel": {
+      "ok": true,
+      "entries": [
+        {
+          "name": "disk-mmc-cache",
+          "path": "/dev/disk/by-partlabel/disk-mmc-cache",
+          "target": "../../mmcblk0p2",
+          "resolved_device": "/dev/mmcblk0p2"
+        }
+      ]
+    },
+    "gpt": [
+      {
+        "ok": true,
+        "device": "/dev/mmcblk0",
+        "header": {
+          "disk_identifier": "1234-ABCD",
+          "holds": "4 entries",
+          "main_table_sectors": "2-33",
+          "first_usable_sector": "2048",
+          "last_usable_sector": "61071326",
+          "partitions_free_space": []
+        },
+        "partitions": [],
+        "raw": "Disk /dev/mmcblk0: ..."
+      }
+    ],
+    "blkid": [
+      {
+        "ok": true,
+        "device": "/dev/mmcblk0p2",
+        "properties": { "DEVNAME": "/dev/mmcblk0p2", "PARTLABEL": "disk-mmc-cache" }
+      }
+    ]
+  }
+}

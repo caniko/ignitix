@@ -17,6 +17,25 @@ The install target module exposes host-first wrappers:
 - `enroll-tpm2-pin` for guarded TPM2+pcrlock enrollment using masked local
   passphrase and PIN fields
 
+## Boot-media CLI
+
+Run the CLI from Ignitix and point it at a consumer flake that imports
+`ignitix.flakeModules.install-targets`:
+
+```bash
+nix run github:caniko/ignitix#ignitix-bootmedia -- install --flake /path/to/consumer usb my-host --build-on split
+nix run github:caniko/ignitix#ignitix-bootmedia -- diagnose --flake /path/to/consumer usb my-host --no-mount --json > report.json
+nix run github:caniko/ignitix#ignitix-bootmedia -- report report.json
+```
+
+`--flake` defaults to the current directory. For `install`, arguments after
+`--` go to `nixos-anywhere`. Diagnosis mounts the installed system by default;
+use `--no-mount` to probe only the live media. `report -` reads from stdin.
+`diagnose` and `report` both accept `--json`; diagnosis preserves the
+collector's exit status even when it prints a valid failure report.
+
+## Routes
+
 Routes are semantic names such as `lan`, `usb`, or `vpn`. Each route resolves a
 target host from explicit route data, media endpoints, or downstream host
 metadata.

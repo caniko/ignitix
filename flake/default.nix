@@ -11,6 +11,7 @@
   };
 in {
   imports = [
+    ./bootmedia.nix
     ./fixture.nix
     ./install-media.nix
     ./install-targets.nix

@@ -1,3 +1,8 @@
+[workspace]
+members = ["bootmedia"]
+default-members = [".", "bootmedia"]
+resolver = "3"
+
 [package]
 name = "ignitix-unlock-luks"
 version = "0.1.0"

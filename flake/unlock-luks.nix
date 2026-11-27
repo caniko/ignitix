@@ -18,6 +18,7 @@
       pname = "ignitix-unlock-luks";
       version = "0.1.0";
       strictDeps = true;
+      cargoExtraArgs = "--locked -p ignitix-unlock-luks";
       nativeBuildInputs = [pkgs.pkg-config];
       buildInputs = guiRuntimeLibs ++ [pkgs.wayland-protocols];
     };
